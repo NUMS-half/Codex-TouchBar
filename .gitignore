@@ -1,0 +1,17 @@
+# Swift Package Manager and local build products
+.build/
+build/
+
+# Finder and editor metadata
+.DS_Store
+.trae/
+DerivedData/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+
+# Project Prompts
+AGENTS.md
+
+# Temporary files
+*.swp
+*.tmp
