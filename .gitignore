@@ -1,6 +1,7 @@
 # Swift Package Manager and local build products
 .build/
 build/
+dist/
 
 # Finder and editor metadata
 .DS_Store

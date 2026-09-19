@@ -47,3 +47,7 @@ build/CodexTouchBar.app/Contents/MacOS/CodexTouchBar --self-test
 ## 开发
 
 项目使用 Swift Package Manager 与 AppKit，没有第三方依赖。
+
+## 发布
+
+首个公开版本为 `v2.0.0`。发布前请阅读 [RELEASING.md](RELEASING.md)：它说明如何生成带 SHA-256 校验文件的 arm64 应用压缩包、创建 Git 标签并在 GitHub 发布 Release。

@@ -165,7 +165,7 @@ private final class OneShotAppServerRequest: @unchecked Sendable {
                 "clientInfo": [
                     "name": "codex-touchbar",
                     "title": "Codex TouchBar",
-                    "version": "2.0",
+                    "version": "2.0.0",
                 ],
                 "capabilities": ["experimentalApi": true],
             ],
