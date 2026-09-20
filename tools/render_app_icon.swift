@@ -32,6 +32,15 @@ NSGradient(
     ending: NSColor(calibratedRed: 0.043, green: 0.063, blue: 0.102, alpha: 1)
 )!.draw(in: NSBezierPath(roundedRect: canvas, xRadius: 224, yRadius: 224), angle: -45)
 
+// The icon is often rendered at 16–32 px. Scale the Touch Bar motif up so it
+// reads clearly there instead of leaving a large, empty outer margin.
+NSGraphicsContext.saveGraphicsState()
+let iconTransform = NSAffineTransform()
+iconTransform.translateX(by: 512, yBy: 512)
+iconTransform.scale(by: 1.2)
+iconTransform.translateX(by: -512, yBy: -512)
+iconTransform.concat()
+
 let shell = NSRect(x: 122, y: 315, width: 780, height: 394)
 NSColor(calibratedWhite: 0, alpha: 0.30).setFill()
 NSBezierPath(roundedRect: shell.offsetBy(dx: 0, dy: -20), xRadius: 104, yRadius: 104).fill()
@@ -76,6 +85,7 @@ roundedBar(NSRect(x: 177, y: 631, width: 210, height: 20), NSColor(calibratedRed
 roundedBar(NSRect(x: 555, y: 631, width: 292, height: 20), muted)
 roundedBar(NSRect(x: 555, y: 631, width: 260, height: 20), NSColor(calibratedRed: 0.286, green: 0.82, blue: 0.49, alpha: 1))
 
+NSGraphicsContext.restoreGraphicsState()
 NSGraphicsContext.restoreGraphicsState()
 guard let png = bitmap.representation(using: .png, properties: [:]) else {
     fputs("could not encode icon PNG\n", stderr)

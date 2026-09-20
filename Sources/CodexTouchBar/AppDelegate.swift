@@ -86,6 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func preferencesChanged() {
+        restartTimer()
         updateTouchBarVisibility()
         pushState()
     }
@@ -119,7 +120,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func restartTimer() {
         timer?.invalidate()
-        let interval: TimeInterval = isCodexFrontmost ? 30 : 300
+        let selectedInterval = Preferences.shared.refreshInterval
+        let interval = isCodexFrontmost ? selectedInterval : 300
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.store.refresh() }
         }

@@ -2,6 +2,12 @@
 
 本项目的所有用户可见变更记录在此文件中。
 
+## [Unreleased]
+
+- Refined the usage panel with a compact rounded presentation, larger detail text, and plan tags.
+- Added a selectable automatic refresh interval for Codex foreground use.
+- Enlarged the app icon motif to reduce unused whitespace.
+
 ## [2.0.0] - 2026-09-20
 
 ### Added
