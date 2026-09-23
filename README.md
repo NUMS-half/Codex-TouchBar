@@ -8,6 +8,7 @@
 - Codex Desktop 位于前台时，在左侧显示两张 Touch Bar 额度卡；右侧亮度、音量与 Siri 等系统 Control Strip 保持可用。
 - 启动、Codex 获得焦点、打开菜单和系统唤醒时会立即刷新；点击额度卡或菜单栏的“刷新”也可手动更新。
 - Codex 位于前台时默认每 30 秒刷新，后台固定每 5 分钟刷新。可在详情中将前台自动刷新设为 30 秒、1 分钟、2 分钟、5 分钟或 10 分钟。
+- 详情面板显示积分、可用重置次数及服务端提供的最近到期时间；异常提示保持紧凑，完整错误可展开查看。
 - 额度、进度条和菜单栏数值统一按四色状态展示：红、橙、黄、绿。
 - 支持登录启动、睡眠唤醒恢复、24 小时本地缓存与失效标记。
 - Touch Bar 私有接口不可用时，自动退回紧凑 Control Strip 摘要；菜单栏功能不受影响。
@@ -51,4 +52,4 @@ build/CodexTouchBar.app/Contents/MacOS/CodexTouchBar --self-test
 
 ## 发布
 
-首个公开版本为 `v2.0.0`。发布前请阅读 [RELEASING.md](RELEASING.md)：它说明如何生成带 SHA-256 校验文件的 arm64 应用压缩包、创建 Git 标签并在 GitHub 发布 Release。
+当前版本为 `v2.0.1`。发布前请阅读 [RELEASING.md](RELEASING.md)：它说明如何生成带 SHA-256 校验文件的 arm64 应用压缩包、创建 Git 标签并在 GitHub 发布 Release。

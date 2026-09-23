@@ -23,13 +23,20 @@ enum SelfTest {
                     "credits": ["unlimited": true],
                 ],
             ],
-            "rateLimitResetCredits": ["availableCount": 2],
+            "rateLimitResetCredits": [
+                "availableCount": 2,
+                "credits": [
+                    ["status": "available", "resetType": "codexRateLimits", "expiresAt": 1_500],
+                    ["status": "available", "resetType": "codexRateLimits", "expiresAt": 1_200],
+                ],
+            ],
         ]
         guard let second = try? UsageSnapshotParser.parse(result: multiBucket, now: date),
               second.fiveHour == nil,
               second.weekly?.remainingPercent == 60,
               second.unlimitedCredits,
-              second.availableResetCredits == 2 else { return false }
+              second.availableResetCredits == 2,
+              second.earliestAvailableResetExpiry == Date(timeIntervalSince1970: 1_200) else { return false }
 
         let unknown: [String: Any] = [
             "rateLimits": ["primary": ["usedPercent": 20, "windowDurationMins": 1_440]],

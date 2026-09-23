@@ -38,6 +38,29 @@ struct UsageSnapshot: Codable, Sendable, Equatable {
     let unlimitedCredits: Bool
     let availableResetCredits: Int
     let fetchedAt: Date
+    let earliestAvailableResetExpiry: Date?
+
+    init(
+        fiveHour: UsageWindow?,
+        weekly: UsageWindow?,
+        planType: String?,
+        limitName: String?,
+        creditBalance: String?,
+        unlimitedCredits: Bool,
+        availableResetCredits: Int,
+        fetchedAt: Date,
+        earliestAvailableResetExpiry: Date? = nil
+    ) {
+        self.fiveHour = fiveHour
+        self.weekly = weekly
+        self.planType = planType
+        self.limitName = limitName
+        self.creditBalance = creditBalance
+        self.unlimitedCredits = unlimitedCredits
+        self.availableResetCredits = availableResetCredits
+        self.fetchedAt = fetchedAt
+        self.earliestAvailableResetExpiry = earliestAvailableResetExpiry
+    }
 }
 
 enum SnapshotFreshness: Sendable, Equatable {
@@ -82,7 +105,7 @@ enum UsageServiceError: LocalizedError, Sendable {
 }
 
 protocol UsageProvider: Sendable {
-    func fetch() async throws -> UsageSnapshot
+    func fetch(includeResetCreditDetails: Bool) async throws -> UsageSnapshot
 }
 
 /// Converts the app-server JSON response into stable UI values. It deliberately
@@ -115,6 +138,15 @@ enum UsageSnapshotParser {
 
         let credits = limits["credits"] as? [String: Any]
         let resetSummary = result["rateLimitResetCredits"] as? [String: Any]
+        let earliestResetExpiry = (resetSummary?["credits"] as? [[String: Any]])?
+            .filter {
+                ($0["status"] as? String) == "available"
+                    && ($0["resetType"] as? String) == "codexRateLimits"
+            }
+            .compactMap { double($0["expiresAt"]) }
+            .map(Date.init(timeIntervalSince1970:))
+            .filter { $0 > now }
+            .min()
         return UsageSnapshot(
             fiveHour: fiveHour,
             weekly: weekly,
@@ -123,7 +155,8 @@ enum UsageSnapshotParser {
             creditBalance: credits?["balance"] as? String,
             unlimitedCredits: bool(credits?["unlimited"]) ?? false,
             availableResetCredits: int(resetSummary?["availableCount"]) ?? 0,
-            fetchedAt: now
+            fetchedAt: now,
+            earliestAvailableResetExpiry: earliestResetExpiry
         )
     }
 

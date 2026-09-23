@@ -9,6 +9,8 @@ final class UsageStore {
     private(set) var freshness: SnapshotFreshness = .cached
     private(set) var errorMessage: String?
     private(set) var isRefreshing = false
+    private var activeFetchIncludesResetDetails = false
+    private var detailedRefreshPending = false
 
     var onChange: (() -> Void)?
 
@@ -24,19 +26,28 @@ final class UsageStore {
         }
     }
 
-    func refresh() {
-        guard !isRefreshing else { return }
+    func refresh(includeResetCreditDetails: Bool = false) {
+        if isRefreshing {
+            if includeResetCreditDetails && !activeFetchIncludesResetDetails {
+                detailedRefreshPending = true
+            }
+            return
+        }
         isRefreshing = true
+        activeFetchIncludesResetDetails = includeResetCreditDetails
         notify()
 
-        Task { [weak self, provider] in
+        Task { [weak self, provider, includeResetCreditDetails] in
             guard let self else { return }
             do {
-                let value = try await provider.fetch()
-                self.snapshot = value
+                let value = try await provider.fetch(includeResetCreditDetails: includeResetCreditDetails)
+                self.snapshot = self.applyingResetExpiryPolicy(
+                    to: value,
+                    includeResetCreditDetails: includeResetCreditDetails
+                )
                 self.freshness = .live
                 self.errorMessage = nil
-                self.cache.save(value)
+                if let snapshot = self.snapshot { self.cache.save(snapshot) }
             } catch {
                 let message = error.localizedDescription
                 self.errorMessage = message
@@ -45,8 +56,39 @@ final class UsageStore {
                 }
             }
             self.isRefreshing = false
-            self.notify()
+            self.activeFetchIncludesResetDetails = false
+            let shouldFetchDetails = self.detailedRefreshPending
+            self.detailedRefreshPending = false
+            if shouldFetchDetails {
+                self.refresh(includeResetCreditDetails: true)
+            } else {
+                self.notify()
+            }
         }
+    }
+
+    private func applyingResetExpiryPolicy(
+        to value: UsageSnapshot,
+        includeResetCreditDetails: Bool
+    ) -> UsageSnapshot {
+        guard !includeResetCreditDetails,
+              let previous = snapshot,
+              previous.availableResetCredits == value.availableResetCredits,
+              let expiry = previous.earliestAvailableResetExpiry,
+              expiry > Date() else {
+            return value
+        }
+        return UsageSnapshot(
+            fiveHour: value.fiveHour,
+            weekly: value.weekly,
+            planType: value.planType,
+            limitName: value.limitName,
+            creditBalance: value.creditBalance,
+            unlimitedCredits: value.unlimitedCredits,
+            availableResetCredits: value.availableResetCredits,
+            fetchedAt: value.fetchedAt,
+            earliestAvailableResetExpiry: expiry
+        )
     }
 
     private func notify() {

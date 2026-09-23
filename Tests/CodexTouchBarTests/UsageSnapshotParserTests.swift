@@ -54,6 +54,26 @@ final class UsageSnapshotParserTests: XCTestCase {
         XCTAssertNil(snapshot.weekly)
     }
 
+    func testUsesEarliestFutureAvailableCodexResetExpiry() throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let response: [String: Any] = [
+            "rateLimits": ["primary": ["usedPercent": 20, "windowDurationMins": 300]],
+            "rateLimitResetCredits": [
+                "availableCount": 2,
+                "credits": [
+                    ["status": "available", "resetType": "codexRateLimits", "expiresAt": 1_500],
+                    ["status": "available", "resetType": "codexRateLimits", "expiresAt": 1_200],
+                    ["status": "available", "resetType": "other", "expiresAt": 1_100],
+                    ["status": "used", "resetType": "codexRateLimits", "expiresAt": 1_050],
+                    ["status": "available", "resetType": "codexRateLimits", "expiresAt": 900],
+                ],
+            ],
+        ]
+        let snapshot = try UsageSnapshotParser.parse(result: response, now: now)
+        XCTAssertEqual(snapshot.availableResetCredits, 2)
+        XCTAssertEqual(snapshot.earliestAvailableResetExpiry, Date(timeIntervalSince1970: 1_200))
+    }
+
     func testCacheExpiresAfterTwentyFourHours() {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

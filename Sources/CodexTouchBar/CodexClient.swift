@@ -22,7 +22,7 @@ struct CodexExecutableResolver: Sendable {
 }
 
 protocol AppServerRunning: Sendable {
-    func readUsage(from executable: URL) async throws -> Data
+    func readUsage(from executable: URL, includeResetCreditDetails: Bool) async throws -> Data
 }
 
 /// Incrementally extracts request id 2 from stdout. Notifications and the
@@ -55,9 +55,12 @@ struct LineDelimitedUsageResponseParser {
 }
 
 struct ProcessAppServerRunner: AppServerRunning {
-    func readUsage(from executable: URL) async throws -> Data {
+    func readUsage(from executable: URL, includeResetCreditDetails: Bool) async throws -> Data {
         try await Task.detached(priority: .utility) {
-            try OneShotAppServerRequest.run(executable: executable)
+            try OneShotAppServerRequest.run(
+                executable: executable,
+                includeResetCreditDetails: includeResetCreditDetails
+            )
         }.value
     }
 }
@@ -74,9 +77,12 @@ actor CodexUsageService: UsageProvider {
         self.runner = runner
     }
 
-    func fetch() async throws -> UsageSnapshot {
+    func fetch(includeResetCreditDetails: Bool) async throws -> UsageSnapshot {
         guard let executable = resolver.resolve() else { throw UsageServiceError.codexNotFound }
-        let response = try await runner.readUsage(from: executable)
+        let response = try await runner.readUsage(
+            from: executable,
+            includeResetCreditDetails: includeResetCreditDetails
+        )
         return try UsageSnapshotParser.parse(data: response)
     }
 }
@@ -92,12 +98,12 @@ private final class OneShotAppServerRequest: @unchecked Sendable {
     private var stderr = ""
     private var process: Process?
 
-    static func run(executable: URL) throws -> Data {
+    static func run(executable: URL, includeResetCreditDetails: Bool) throws -> Data {
         let request = OneShotAppServerRequest()
-        return try request.perform(executable: executable)
+        return try request.perform(executable: executable, includeResetCreditDetails: includeResetCreditDetails)
     }
 
-    private func perform(executable: URL) throws -> Data {
+    private func perform(executable: URL, includeResetCreditDetails: Bool) throws -> Data {
         let process = Process()
         process.executableURL = executable
         process.arguments = ["app-server", "--stdio"]
@@ -135,7 +141,9 @@ private final class OneShotAppServerRequest: @unchecked Sendable {
 
         do {
             try process.run()
-            try input.fileHandleForWriting.write(contentsOf: requestPayload())
+            try input.fileHandleForWriting.write(
+                contentsOf: requestPayload(includeResetCreditDetails: includeResetCreditDetails)
+            )
         } catch {
             finish(.failure(UsageServiceError.launchFailed(error.localizedDescription)))
         }
@@ -156,7 +164,7 @@ private final class OneShotAppServerRequest: @unchecked Sendable {
         return try finished.get()
     }
 
-    private func requestPayload() throws -> Data {
+    private func requestPayload(includeResetCreditDetails: Bool) throws -> Data {
         let initialize: [String: Any] = [
             "jsonrpc": "2.0",
             "id": 1,
@@ -165,7 +173,7 @@ private final class OneShotAppServerRequest: @unchecked Sendable {
                 "clientInfo": [
                     "name": "codex-touchbar",
                     "title": "Codex TouchBar",
-                    "version": "2.0.0",
+                    "version": "2.0.1",
                 ],
                 "capabilities": ["experimentalApi": true],
             ],
@@ -174,7 +182,7 @@ private final class OneShotAppServerRequest: @unchecked Sendable {
             "jsonrpc": "2.0",
             "id": 2,
             "method": "account/rateLimits/read",
-            "params": ["excludeResetCreditDetails": true],
+            "params": ["excludeResetCreditDetails": !includeResetCreditDetails],
         ]
         var payload = try JSONSerialization.data(withJSONObject: initialize)
         payload.append(0x0A)

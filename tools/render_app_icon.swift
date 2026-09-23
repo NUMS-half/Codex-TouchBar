@@ -25,67 +25,34 @@ guard let bitmap = NSBitmapImageRep(
 let context = NSGraphicsContext(bitmapImageRep: bitmap)!
 NSGraphicsContext.saveGraphicsState()
 NSGraphicsContext.current = context
+context.imageInterpolation = .high
 
-let canvas = NSRect(x: 0, y: 0, width: size, height: size)
+// A restrained, large Touch Bar silhouette echoes the menu-bar mark. Two
+// coloured strokes communicate the two quota windows without tiny lettering.
+let background = NSBezierPath(roundedRect: NSRect(x: 64, y: 64, width: 896, height: 896), xRadius: 206, yRadius: 206)
 NSGradient(
-    starting: NSColor(calibratedRed: 0.09, green: 0.125, blue: 0.20, alpha: 1),
-    ending: NSColor(calibratedRed: 0.043, green: 0.063, blue: 0.102, alpha: 1)
-)!.draw(in: NSBezierPath(roundedRect: canvas, xRadius: 224, yRadius: 224), angle: -45)
+    starting: NSColor(calibratedRed: 0.13, green: 0.18, blue: 0.29, alpha: 1),
+    ending: NSColor(calibratedRed: 0.07, green: 0.10, blue: 0.17, alpha: 1)
+)!.draw(in: background, angle: 90)
 
-// The icon is often rendered at 16–32 px. Scale the Touch Bar motif up so it
-// reads clearly there instead of leaving a large, empty outer margin.
-NSGraphicsContext.saveGraphicsState()
-let iconTransform = NSAffineTransform()
-iconTransform.translateX(by: 512, yBy: 512)
-iconTransform.scale(by: 1.2)
-iconTransform.translateX(by: -512, yBy: -512)
-iconTransform.concat()
+let shell = NSBezierPath(roundedRect: NSRect(x: 153, y: 357, width: 718, height: 310), xRadius: 105, yRadius: 105)
+NSColor(calibratedRed: 0.16, green: 0.22, blue: 0.33, alpha: 1).setFill()
+shell.fill()
+NSColor(calibratedRed: 0.85, green: 0.90, blue: 0.96, alpha: 1).setStroke()
+shell.lineWidth = 30
+shell.stroke()
 
-let shell = NSRect(x: 122, y: 315, width: 780, height: 394)
-NSColor(calibratedWhite: 0, alpha: 0.30).setFill()
-NSBezierPath(roundedRect: shell.offsetBy(dx: 0, dy: -20), xRadius: 104, yRadius: 104).fill()
-NSColor(calibratedRed: 0.067, green: 0.102, blue: 0.157, alpha: 1).setFill()
-NSBezierPath(roundedRect: shell, xRadius: 104, yRadius: 104).fill()
-NSColor(calibratedRed: 0.20, green: 0.255, blue: 0.333, alpha: 1).setStroke()
-let shellOutline = NSBezierPath(roundedRect: shell, xRadius: 104, yRadius: 104)
-shellOutline.lineWidth = 18
-shellOutline.stroke()
-
-func roundedBar(_ rect: NSRect, _ color: NSColor) {
+func stroke(_ rect: NSRect, color: NSColor) {
     color.setFill()
     NSBezierPath(roundedRect: rect, xRadius: rect.height / 2, yRadius: rect.height / 2).fill()
 }
 
-let muted = NSColor(calibratedRed: 0.15, green: 0.21, blue: 0.28, alpha: 1)
-roundedBar(NSRect(x: 177, y: 385, width: 292, height: 28), NSColor(calibratedRed: 0.286, green: 0.82, blue: 0.49, alpha: 1))
-roundedBar(NSRect(x: 177, y: 438, width: 218, height: 28), muted)
-roundedBar(NSRect(x: 177, y: 438, width: 164, height: 28), NSColor(calibratedRed: 0.953, green: 0.788, blue: 0.302, alpha: 1))
-roundedBar(NSRect(x: 555, y: 385, width: 292, height: 28), NSColor(calibratedRed: 0.22, green: 0.74, blue: 0.97, alpha: 1))
-roundedBar(NSRect(x: 555, y: 438, width: 218, height: 28), muted)
-roundedBar(NSRect(x: 555, y: 438, width: 194, height: 28), NSColor(calibratedRed: 0.286, green: 0.82, blue: 0.49, alpha: 1))
+let track = NSColor(calibratedRed: 0.34, green: 0.42, blue: 0.55, alpha: 1)
+stroke(NSRect(x: 239, y: 482, width: 234, height: 60), color: track)
+stroke(NSRect(x: 551, y: 482, width: 234, height: 60), color: track)
+stroke(NSRect(x: 239, y: 482, width: 177, height: 60), color: NSColor(calibratedRed: 0.38, green: 0.77, blue: 0.97, alpha: 1))
+stroke(NSRect(x: 551, y: 482, width: 192, height: 60), color: NSColor(calibratedRed: 0.37, green: 0.88, blue: 0.69, alpha: 1))
 
-func clock(at center: NSPoint) {
-    NSColor(calibratedRed: 0.863, green: 0.91, blue: 0.96, alpha: 1).setFill()
-    NSBezierPath(ovalIn: NSRect(x: center.x - 51, y: center.y - 51, width: 102, height: 102)).fill()
-    NSColor(calibratedRed: 0.09, green: 0.125, blue: 0.20, alpha: 1).setStroke()
-    let hands = NSBezierPath()
-    hands.move(to: NSPoint(x: center.x, y: center.y + 34))
-    hands.line(to: center)
-    hands.line(to: NSPoint(x: center.x + 25, y: center.y - 18))
-    hands.lineCapStyle = .round
-    hands.lineJoinStyle = .round
-    hands.lineWidth = 14
-    hands.stroke()
-}
-
-clock(at: NSPoint(x: 323, y: 549))
-clock(at: NSPoint(x: 701, y: 549))
-roundedBar(NSRect(x: 177, y: 631, width: 292, height: 20), muted)
-roundedBar(NSRect(x: 177, y: 631, width: 210, height: 20), NSColor(calibratedRed: 0.953, green: 0.788, blue: 0.302, alpha: 1))
-roundedBar(NSRect(x: 555, y: 631, width: 292, height: 20), muted)
-roundedBar(NSRect(x: 555, y: 631, width: 260, height: 20), NSColor(calibratedRed: 0.286, green: 0.82, blue: 0.49, alpha: 1))
-
-NSGraphicsContext.restoreGraphicsState()
 NSGraphicsContext.restoreGraphicsState()
 guard let png = bitmap.representation(using: .png, properties: [:]) else {
     fputs("could not encode icon PNG\n", stderr)

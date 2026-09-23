@@ -39,7 +39,10 @@ codesign --verify --deep --strict "$APP"
 mkdir -p "$ARCHIVE_DIR"
 rm -f "$ARCHIVE" "$CHECKSUM"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ARCHIVE"
-shasum -a 256 "$ARCHIVE" > "$CHECKSUM"
+(
+  cd "$ARCHIVE_DIR"
+  shasum -a 256 "$(basename "$ARCHIVE")" > "$(basename "$CHECKSUM")"
+)
 
 echo "Release package: $ARCHIVE"
 echo "Checksum:        $CHECKSUM"

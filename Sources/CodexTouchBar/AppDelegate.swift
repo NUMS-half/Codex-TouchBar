@@ -28,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureCallbacks() {
-        panel.onRefresh = { [weak self] in self?.store.refresh() }
+        panel.onRefresh = { [weak self] in self?.store.refresh(includeResetCreditDetails: true) }
         panel.onToggleTouchBar = { [weak self] in self?.toggleTouchBar() }
         panel.onToggleLoginItem = { [weak self] in self?.toggleLoginItem() }
         panel.onQuit = { NSApp.terminate(nil) }
@@ -136,7 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             contextMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY + 4), in: button)
             return
         }
-        store.refresh()
+        store.refresh(includeResetCreditDetails: true)
         panel.show(relativeTo: button.bounds, of: button)
     }
 

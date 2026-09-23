@@ -4,9 +4,18 @@
 
 ## [Unreleased]
 
-- Refined the usage panel with a compact rounded presentation, larger detail text, and plan tags.
-- Added a selectable automatic refresh interval for Codex foreground use.
-- Enlarged the app icon motif to reduce unused whitespace.
+## [2.0.1] - 2026-09-24
+
+### Added
+
+- 在详情面板显示可用重置机会的最近到期时间，并提供完整错误详情入口。
+
+### Changed
+
+- 收紧额度面板宽度与高度，统一使用线性图标，并重新设计简约应用图标。
+- 刷新失败时显示简短错误摘要，完整信息可换行查看；面板不再因错误文字变宽。
+- 修正标题中重复的“更新于”，并优化按钮和异常状态布局。
+- 打开面板或点击刷新时读取重置机会详情；后台刷新仍仅请求摘要。
 
 ## [2.0.0] - 2026-09-20
 
