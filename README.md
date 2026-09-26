@@ -52,4 +52,4 @@ build/CodexTouchBar.app/Contents/MacOS/CodexTouchBar --self-test
 
 ## 发布
 
-当前版本为 `v2.0.1`。发布前请阅读 [RELEASING.md](RELEASING.md)：它说明如何生成带 SHA-256 校验文件的 arm64 应用压缩包、创建 Git 标签并在 GitHub 发布 Release。
+当前版本为 `v2.0.2`。发布前请阅读 [RELEASING.md](RELEASING.md)：它说明如何生成带 SHA-256 校验文件的 arm64 应用压缩包、创建 Git 标签并在 GitHub 发布 Release。

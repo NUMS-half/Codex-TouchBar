@@ -9,6 +9,7 @@ struct CodexExecutableResolver: Sendable {
 
     func resolve() -> URL? {
         var candidates = [
+            "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
             "/Applications/ChatGPT.app/Contents/Resources/codex",
             "/Applications/Codex.app/Contents/Resources/codex",
         ]
@@ -173,7 +174,7 @@ private final class OneShotAppServerRequest: @unchecked Sendable {
                 "clientInfo": [
                     "name": "codex-touchbar",
                     "title": "Codex TouchBar",
-                    "version": "2.0.1",
+                    "version": "2.0.2",
                 ],
                 "capabilities": ["experimentalApi": true],
             ],

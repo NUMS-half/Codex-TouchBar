@@ -3,6 +3,11 @@ import Foundation
 enum SelfTest {
     static func run() -> Bool {
         guard CodexExecutableResolver().resolve() != nil else { return false }
+        let currentBundledCodex = "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"
+        if FileManager.default.isExecutableFile(atPath: currentBundledCodex),
+           CodexExecutableResolver().resolve()?.path != currentBundledCodex {
+            return false
+        }
         let date = Date(timeIntervalSince1970: 1_000)
 
         let reversed: [String: Any] = [

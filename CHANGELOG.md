@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-09-26
+
+### Fixed
+
+- 适配新版 ChatGPT 应用内置 Codex CLI 的路径，避免额度刷新误用需要 Node.js 的 Homebrew 启动脚本并报 `status=127`。
+- 自检增加新版内置 CLI 的优先级检查。
+
 ## [2.0.1] - 2026-09-24
 
 ### Added
