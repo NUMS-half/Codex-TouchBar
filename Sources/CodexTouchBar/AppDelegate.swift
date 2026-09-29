@@ -5,6 +5,7 @@ import ServiceManagement
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = UsageStore()
     private let touchBar = TouchBarController()
+    private let desktopActions = DesktopActions()
     private let panel = PanelController()
     private var statusItem: NSStatusItem!
     private let statusReadout = StatusUsageReadoutView()
@@ -33,6 +34,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.onToggleLoginItem = { [weak self] in self?.toggleLoginItem() }
         panel.onQuit = { NSApp.terminate(nil) }
         touchBar.onRefresh = { [weak self] in self?.store.refresh() }
+        touchBar.onNewChat = { [weak self] in
+            self?.performDesktopAction { try self?.desktopActions.newChat() }
+        }
+        touchBar.onToggleSidebar = { [weak self] in
+            self?.performDesktopAction { try self?.desktopActions.toggleSidebar() }
+        }
+        touchBar.onOpenSettings = { [weak self] in
+            self?.performDesktopAction { try self?.desktopActions.openSettings() }
+        }
+        touchBar.onNavigateBack = { [weak self] in
+            self?.performDesktopAction { try self?.desktopActions.navigateBack() }
+        }
+        touchBar.onNavigateForward = { [weak self] in
+            self?.performDesktopAction { try self?.desktopActions.navigateForward() }
+        }
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(preferencesChanged),
@@ -186,6 +202,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func quit() { NSApp.terminate(nil) }
 
+    private func performDesktopAction(_ action: () throws -> Void) {
+        do {
+            try action()
+        } catch {
+            touchBar.showFeedback(error.localizedDescription)
+        }
+    }
+
     private func pushState() {
         let snapshot = store.snapshot
         panel.update(
@@ -194,7 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             error: store.errorMessage ?? configurationError,
             isRefreshing: store.isRefreshing
         )
-        touchBar.update(snapshot: snapshot, isRefreshing: store.isRefreshing)
+        touchBar.update(snapshot: snapshot, freshness: store.freshness, isRefreshing: store.isRefreshing)
         updateTouchBarVisibility()
 
         statusReadout.update(fiveHour: snapshot?.fiveHour, weekly: snapshot?.weekly)

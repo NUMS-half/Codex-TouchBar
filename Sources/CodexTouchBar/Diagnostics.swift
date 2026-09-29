@@ -49,6 +49,33 @@ enum SelfTest {
         guard let third = try? UsageSnapshotParser.parse(result: unknown, now: date),
               third.fiveHour == nil, third.weekly == nil else { return false }
 
+        let compactCardWidth = TouchBarLayout.compactQuotaWidth(for: TouchBarLayout.width)
+        let actionWidth = TouchBarLayout.actionWidth(for: TouchBarLayout.width)
+        let navigationWidth = TouchBarLayout.navigationButtonWidth(for: TouchBarLayout.width)
+        guard compactCardWidth == 152,
+              compactCardWidth * 2 + TouchBarLayout.elementGap == TouchBarLayout.width / 2,
+              actionWidth == 70,
+              navigationWidth == 32,
+              navigationWidth * 2 + TouchBarLayout.navigationButtonGap == actionWidth,
+              abs(TouchBarLayout.actionCount * actionWidth
+                  + (TouchBarLayout.actionCount - 1) * TouchBarLayout.elementGap
+                  + 2 * TouchBarLayout.actionInset - TouchBarLayout.width / 2) < 0.001,
+              TouchBarLayout.actionInset == TouchBarLayout.elementGap,
+              DesktopMenuAction.newChat.matches(menuTitle: "新聊天"),
+              DesktopMenuAction.newChat.matches(topLevelTitle: "文件"),
+              DesktopMenuAction.toggleSidebar.matches(menuTitle: "显示/隐藏侧边栏"),
+              DesktopMenuAction.toggleSidebar.matches(topLevelTitle: "视图"),
+              DesktopMenuAction.settings.matches(menuTitle: "设置…"),
+              DesktopMenuAction.back.matches(menuTitle: "Back"),
+              DesktopMenuAction.forward.matches(menuTitle: "前进"),
+              !DesktopMenuAction.back.matches(menuTitle: "Browser Back"),
+              UsageWindow(kind: .fiveHour, usedPercent: 100, durationMinutes: 300, resetsAt: nil).remainingPercent == 0,
+              UsageWindow(kind: .weekly, usedPercent: 0, durationMinutes: 10_080, resetsAt: nil).remainingPercent == 100,
+              formatShortCountdown(date.addingTimeInterval(8 * 86_400 + 23 * 3_600), now: date) == "8天23时",
+              SnapshotFreshness.cached.isStale,
+              SnapshotFreshness.stale("offline").isStale,
+              !SnapshotFreshness.live.isStale else { return false }
+
         var reader = LineDelimitedUsageResponseParser()
         let notification = #"{"method":"account/rateLimits/updated","params":{}}"# + "\n"
         let response = #"{"id":2,"result":{"rateLimits":{"primary":{"usedPercent":1,"windowDurationMins":300}}}}"# + "\n"

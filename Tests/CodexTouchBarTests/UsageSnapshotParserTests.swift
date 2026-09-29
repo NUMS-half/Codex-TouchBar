@@ -4,6 +4,47 @@ import XCTest
 @testable import CodexTouchBar
 
 final class UsageSnapshotParserTests: XCTestCase {
+    func testTouchBarCompactQuotaFitsExactlyHalf() {
+        let width = TouchBarLayout.width
+        let cardWidth = TouchBarLayout.compactQuotaWidth(for: width)
+        let actionWidth = TouchBarLayout.actionWidth(for: width)
+        let navigationWidth = TouchBarLayout.navigationButtonWidth(for: width)
+        XCTAssertEqual(cardWidth, 152)
+        XCTAssertEqual(cardWidth * 2 + TouchBarLayout.elementGap, width / 2)
+        XCTAssertEqual(actionWidth, 70)
+        XCTAssertEqual(navigationWidth, 32)
+        XCTAssertEqual(navigationWidth * 2 + TouchBarLayout.navigationButtonGap, actionWidth)
+        XCTAssertEqual(
+            TouchBarLayout.actionCount * actionWidth
+                + (TouchBarLayout.actionCount - 1) * TouchBarLayout.elementGap
+                + 2 * TouchBarLayout.actionInset,
+            width / 2,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(TouchBarLayout.actionInset, TouchBarLayout.elementGap)
+    }
+
+    func testTouchBarQuotaBoundariesAndLongCountdown() {
+        XCTAssertEqual(UsageWindow(kind: .fiveHour, usedPercent: 100, durationMinutes: 300, resetsAt: nil).remainingPercent, 0)
+        XCTAssertEqual(UsageWindow(kind: .weekly, usedPercent: 0, durationMinutes: 10_080, resetsAt: nil).remainingPercent, 100)
+        let now = Date(timeIntervalSince1970: 1_000)
+        XCTAssertEqual(formatShortCountdown(now.addingTimeInterval(8 * 86_400 + 23 * 3_600), now: now), "8天23时")
+        XCTAssertTrue(SnapshotFreshness.cached.isStale)
+        XCTAssertTrue(SnapshotFreshness.stale("offline").isStale)
+        XCTAssertFalse(SnapshotFreshness.live.isStale)
+    }
+
+    func testNativeMenuActionTitles() {
+        XCTAssertTrue(DesktopMenuAction.newChat.matches(menuTitle: "新聊天"))
+        XCTAssertTrue(DesktopMenuAction.newChat.matches(topLevelTitle: "File"))
+        XCTAssertTrue(DesktopMenuAction.toggleSidebar.matches(menuTitle: "显示/隐藏侧边栏"))
+        XCTAssertTrue(DesktopMenuAction.toggleSidebar.matches(topLevelTitle: "查看"))
+        XCTAssertTrue(DesktopMenuAction.settings.matches(menuTitle: "Settings..."))
+        XCTAssertTrue(DesktopMenuAction.back.matches(menuTitle: "返回"))
+        XCTAssertTrue(DesktopMenuAction.forward.matches(menuTitle: "Forward"))
+        XCTAssertFalse(DesktopMenuAction.back.matches(menuTitle: "Browser Back"))
+    }
+
     func testUsageColorBandsCoverTheirBoundaries() {
         XCTAssertEqual(UsageColorBand(remainingPercent: 0), .critical)
         XCTAssertEqual(UsageColorBand(remainingPercent: 10), .critical)
