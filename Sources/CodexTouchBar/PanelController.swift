@@ -307,8 +307,8 @@ final class PanelController: NSObject, NSPopoverDelegate {
         refreshIntervalPopup.selectItem(withTag: Int(Preferences.shared.refreshInterval))
         refreshButton.title = isRefreshing ? "刷新…" : "刷新"
         refreshButton.isEnabled = !isRefreshing
-        touchBarButton.title = "Touch Bar \(Preferences.shared.touchBarEnabled ? "开" : "关")"
-        loginButton.title = "登录启动 \(SMAppService.mainApp.status == .enabled ? "开" : "关")"
+        touchBarButton.title = "Touch Bar：\(Preferences.shared.touchBarEnabled ? "开" : "关")"
+        loginButton.title = "登录启动：\(SMAppService.mainApp.status == .enabled ? "开" : "关")"
     }
 
     private func creditText(_ snapshot: UsageSnapshot?) -> String {

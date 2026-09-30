@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.onToggleLoginItem = { [weak self] in self?.toggleLoginItem() }
         panel.onQuit = { NSApp.terminate(nil) }
         touchBar.onRefresh = { [weak self] in self?.store.refresh() }
+        touchBar.onClose = { Preferences.shared.touchBarEnabled = false }
         touchBar.onNewChat = { [weak self] in
             self?.performDesktopAction { try self?.desktopActions.newChat() }
         }

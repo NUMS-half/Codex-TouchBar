@@ -8,16 +8,22 @@ final class UsageSnapshotParserTests: XCTestCase {
         let width = TouchBarLayout.width
         let cardWidth = TouchBarLayout.compactQuotaWidth(for: width)
         let actionWidth = TouchBarLayout.actionWidth(for: width)
-        let navigationWidth = TouchBarLayout.navigationButtonWidth(for: width)
-        XCTAssertEqual(cardWidth, 152)
+        let navigationWidth = TouchBarLayout.navigationControlWidth(for: width)
+        XCTAssertEqual(TouchBarLayout.closeWidth, 36)
+        XCTAssertEqual(cardWidth, 160)
         XCTAssertEqual(cardWidth * 2 + TouchBarLayout.elementGap, width / 2)
-        XCTAssertEqual(actionWidth, 70)
-        XCTAssertEqual(navigationWidth, 32)
-        XCTAssertEqual(navigationWidth * 2 + TouchBarLayout.navigationButtonGap, actionWidth)
+        XCTAssertEqual(actionWidth, 68)
+        XCTAssertEqual(navigationWidth, actionWidth)
+        XCTAssertEqual(navigationWidth / 2, 34)
+        XCTAssertEqual(
+            width / 2 - TouchBarLayout.actionInset
+                - 3 * actionWidth - 3 * TouchBarLayout.elementGap - navigationWidth,
+            TouchBarLayout.navigationTrailingInset
+        )
         XCTAssertEqual(
             TouchBarLayout.actionCount * actionWidth
                 + (TouchBarLayout.actionCount - 1) * TouchBarLayout.elementGap
-                + 2 * TouchBarLayout.actionInset,
+                + TouchBarLayout.actionInset + TouchBarLayout.navigationTrailingInset,
             width / 2,
             accuracy: 0.001
         )

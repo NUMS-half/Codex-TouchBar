@@ -49,17 +49,23 @@ enum SelfTest {
         guard let third = try? UsageSnapshotParser.parse(result: unknown, now: date),
               third.fiveHour == nil, third.weekly == nil else { return false }
 
-        let compactCardWidth = TouchBarLayout.compactQuotaWidth(for: TouchBarLayout.width)
-        let actionWidth = TouchBarLayout.actionWidth(for: TouchBarLayout.width)
-        let navigationWidth = TouchBarLayout.navigationButtonWidth(for: TouchBarLayout.width)
-        guard compactCardWidth == 152,
-              compactCardWidth * 2 + TouchBarLayout.elementGap == TouchBarLayout.width / 2,
-              actionWidth == 70,
-              navigationWidth == 32,
-              navigationWidth * 2 + TouchBarLayout.navigationButtonGap == actionWidth,
+        let contentWidth = TouchBarLayout.width
+        let compactCardWidth = TouchBarLayout.compactQuotaWidth(for: contentWidth)
+        let actionWidth = TouchBarLayout.actionWidth(for: contentWidth)
+        let navigationWidth = TouchBarLayout.navigationControlWidth(for: contentWidth)
+        guard TouchBarLayout.closeWidth == 36,
+              compactCardWidth == 160,
+              compactCardWidth * 2 + TouchBarLayout.elementGap == contentWidth / 2,
+              actionWidth == 68,
+              navigationWidth == actionWidth,
+              navigationWidth / 2 == 34,
+              contentWidth / 2 - TouchBarLayout.actionInset
+                  - 3 * actionWidth - 3 * TouchBarLayout.elementGap - navigationWidth
+                  == TouchBarLayout.navigationTrailingInset,
               abs(TouchBarLayout.actionCount * actionWidth
                   + (TouchBarLayout.actionCount - 1) * TouchBarLayout.elementGap
-                  + 2 * TouchBarLayout.actionInset - TouchBarLayout.width / 2) < 0.001,
+                  + TouchBarLayout.actionInset + TouchBarLayout.navigationTrailingInset
+                  - contentWidth / 2) < 0.001,
               TouchBarLayout.actionInset == TouchBarLayout.elementGap,
               DesktopMenuAction.newChat.matches(menuTitle: "新聊天"),
               DesktopMenuAction.newChat.matches(topLevelTitle: "文件"),

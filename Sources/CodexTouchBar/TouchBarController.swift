@@ -3,6 +3,7 @@ import ObjectiveC
 
 private extension NSTouchBarItem.Identifier {
     static let codexUsage = NSTouchBarItem.Identifier("com.wyx.CodexTouchBar.usage")
+    static let codexClose = NSTouchBarItem.Identifier("com.wyx.CodexTouchBar.close")
     static let codexFallback = NSTouchBarItem.Identifier("com.wyx.CodexTouchBar.fallback")
 }
 
@@ -47,7 +48,12 @@ private enum SystemModalTouchBar {
     }
 }
 
-private final class TouchBarQuotaCard: NSView {
+private final class TouchBarQuotaCard: NSButton {
+    // NSButton is flipped by default, unlike the NSView this card originally
+    // used. Keep the existing bottom-up drawing coordinates while retaining
+    // NSButton's native Touch Bar action handling.
+    override var isFlipped: Bool { false }
+
     private let kind: UsageWindowKind
     private var usageWindow: UsageWindow?
     private var refreshing = false
@@ -58,14 +64,18 @@ private final class TouchBarQuotaCard: NSView {
     init(kind: UsageWindowKind) {
         self.kind = kind
         super.init(frame: .zero)
+        isBordered = false
+        title = ""
+        target = self
+        action = #selector(tapped)
         wantsLayer = true
         toolTip = "点击查看 \(kind.accessibleTitle)"
+        setAccessibilityLabel("查看\(kind.accessibleTitle)额度详情")
     }
 
     required init?(coder: NSCoder) { nil }
 
-    override var acceptsFirstResponder: Bool { true }
-    override func mouseDown(with event: NSEvent) { onClick?() }
+    @objc private func tapped() { onClick?() }
 
     func update(window: UsageWindow?, refreshing: Bool, expanded: Bool, isStale: Bool) {
         self.usageWindow = window
@@ -151,28 +161,124 @@ private final class TouchBarQuotaCard: NSView {
     }
 }
 
-/// The app-owned area remains 620 points; the right-side system Control Strip
-/// is outside this view. Its normal state reserves exactly half for quota.
+private final class TouchBarCloseButton: NSButton {
+    var onClick: (() -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        isBordered = false
+        title = ""
+        target = self
+        action = #selector(tapped)
+        toolTip = "关闭 Touch Bar"
+        setAccessibilityLabel("关闭 Touch Bar")
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: TouchBarLayout.closeWidth, height: TouchBarLayout.height)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.labelColor.withAlphaComponent(0.10).setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).fill()
+
+        let side: CGFloat = 22
+        let circle = NSRect(
+            x: (bounds.width - side) / 2,
+            y: (bounds.height - side) / 2,
+            width: side,
+            height: side
+        )
+        NSColor.labelColor.withAlphaComponent(0.88).setFill()
+        NSBezierPath(ovalIn: circle).fill()
+
+        let cross = NSBezierPath()
+        cross.lineWidth = 2.4
+        cross.lineCapStyle = .round
+        let center = NSPoint(x: circle.midX, y: circle.midY)
+        let arm: CGFloat = 4.5
+        cross.move(to: NSPoint(x: center.x - arm, y: center.y - arm))
+        cross.line(to: NSPoint(x: center.x + arm, y: center.y + arm))
+        cross.move(to: NSPoint(x: center.x - arm, y: center.y + arm))
+        cross.line(to: NSPoint(x: center.x + arm, y: center.y - arm))
+        NSColor.windowBackgroundColor.setStroke()
+        cross.stroke()
+    }
+
+    @objc private func tapped() { onClick?() }
+}
+
+/// The App content occupies 656 points. Its left half holds the quota cards,
+/// and the right half holds actions; macOS places the close replacement beside it.
 enum TouchBarLayout {
-    static let width: CGFloat = 620
+    static let width: CGFloat = 656
     static let height: CGFloat = 30
-    static let elementGap: CGFloat = 6
+    static let elementGap: CGFloat = 8
+    static let closeWidth: CGFloat = 36
     static let expandedGap: CGFloat = 8
-    static let actionInset: CGFloat = 6
+    static let actionInset: CGFloat = 8
     static let actionCount: CGFloat = 4
-    static let navigationButtonGap: CGFloat = 6
+    static let navigationTrailingInset: CGFloat = 24
 
     static func compactQuotaWidth(for totalWidth: CGFloat) -> CGFloat {
         (totalWidth / 2 - elementGap) / 2
     }
 
     static func actionWidth(for totalWidth: CGFloat) -> CGFloat {
-        (totalWidth / 2 - 2 * actionInset - (actionCount - 1) * elementGap) / actionCount
+        let availableWidth = totalWidth / 2 - actionInset - navigationTrailingInset
+            - (actionCount - 1) * elementGap
+        return availableWidth / actionCount
     }
 
-    static func navigationButtonWidth(for totalWidth: CGFloat) -> CGFloat {
-        (actionWidth(for: totalWidth) - navigationButtonGap) / 2
+    static func navigationControlWidth(for totalWidth: CGFloat) -> CGFloat {
+        actionWidth(for: totalWidth)
     }
+}
+
+private final class TouchBarNavigationControl: NSView {
+    private let backButton = NSButton(title: "←", target: nil, action: nil)
+    private let forwardButton = NSButton(title: "→", target: nil, action: nil)
+
+    var onBack: (() -> Void)?
+    var onForward: (() -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        configure(backButton, action: #selector(backTapped), label: "后退")
+        configure(forwardButton, action: #selector(forwardTapped), label: "前进")
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func layout() {
+        super.layout()
+        let segmentWidth = bounds.width / 2
+        backButton.frame = NSRect(x: 0, y: 0, width: segmentWidth, height: bounds.height)
+        forwardButton.frame = NSRect(x: segmentWidth, y: 0, width: segmentWidth, height: bounds.height)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.labelColor.withAlphaComponent(0.10).setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).fill()
+        NSColor.labelColor.withAlphaComponent(0.22).setFill()
+        NSBezierPath(rect: NSRect(x: bounds.midX - 0.5, y: 5, width: 1, height: bounds.height - 10)).fill()
+    }
+
+    private func configure(_ button: NSButton, action: Selector, label: String) {
+        button.target = self
+        button.action = action
+        button.isBordered = false
+        button.font = .systemFont(ofSize: 17, weight: .medium)
+        button.contentTintColor = .labelColor
+        button.setAccessibilityLabel(label)
+        addSubview(button)
+    }
+
+    @objc private func backTapped() { onBack?() }
+    @objc private func forwardTapped() { onForward?() }
 }
 
 private final class TouchBarUsageView: NSView {
@@ -181,8 +287,7 @@ private final class TouchBarUsageView: NSView {
     private let newChatButton = NSButton(title: "＋ 新对话", target: nil, action: nil)
     private let sidebarButton = NSButton(title: "侧边栏", target: nil, action: nil)
     private let settingsButton = NSButton(title: "设置", target: nil, action: nil)
-    private let navigationBackButton = NSButton(title: "←", target: nil, action: nil)
-    private let navigationForwardButton = NSButton(title: "→", target: nil, action: nil)
+    private let navigationControl = TouchBarNavigationControl(frame: .zero)
     private let backButton = NSButton(title: "‹", target: nil, action: nil)
     private let refreshButton = NSButton(title: "↻", target: nil, action: nil)
     private let feedbackLabel = NSTextField(labelWithString: "")
@@ -211,14 +316,13 @@ private final class TouchBarUsageView: NSView {
         configure(newChatButton, action: #selector(newChatTapped))
         configure(sidebarButton, action: #selector(sidebarTapped))
         configure(settingsButton, action: #selector(settingsTapped))
-        configure(navigationBackButton, action: #selector(navigationBackTapped))
-        configure(navigationForwardButton, action: #selector(navigationForwardTapped))
+        navigationControl.onBack = { [weak self] in self?.onNavigateBack?() }
+        navigationControl.onForward = { [weak self] in self?.onNavigateForward?() }
+        addSubview(navigationControl)
         configure(backButton, action: #selector(backTapped))
         configure(refreshButton, action: #selector(refreshTapped))
         backButton.font = .systemFont(ofSize: 20, weight: .medium)
         refreshButton.font = .systemFont(ofSize: 18, weight: .medium)
-        navigationBackButton.font = .systemFont(ofSize: 17, weight: .medium)
-        navigationForwardButton.font = .systemFont(ofSize: 17, weight: .medium)
 
         feedbackLabel.alignment = .center
         feedbackLabel.font = .systemFont(ofSize: 11, weight: .medium)
@@ -244,20 +348,23 @@ private final class TouchBarUsageView: NSView {
             let cardWidth = (width - 2 * edgeWidth - 3 * gap) / 2
             backButton.frame = NSRect(x: 0, y: 0, width: edgeWidth, height: height)
             fiveHour.frame = NSRect(x: edgeWidth + gap, y: 0, width: cardWidth, height: height)
-            weekly.frame = NSRect(x: edgeWidth + gap + cardWidth + gap, y: 0, width: cardWidth, height: height)
+            weekly.frame = NSRect(x: fiveHour.frame.maxX + gap, y: 0, width: cardWidth, height: height)
             refreshButton.frame = NSRect(x: width - edgeWidth, y: 0, width: edgeWidth, height: height)
         } else {
             let half = width / 2
             let cardWidth = TouchBarLayout.compactQuotaWidth(for: width)
             fiveHour.frame = NSRect(x: 0, y: 0, width: cardWidth, height: height)
-            weekly.frame = NSRect(x: cardWidth + TouchBarLayout.elementGap, y: 0, width: cardWidth, height: height)
+            weekly.frame = NSRect(x: fiveHour.frame.maxX + TouchBarLayout.elementGap, y: 0, width: cardWidth, height: height)
             let actionWidth = TouchBarLayout.actionWidth(for: width)
             newChatButton.frame = NSRect(x: half + TouchBarLayout.actionInset, y: 0, width: actionWidth, height: height)
             sidebarButton.frame = NSRect(x: newChatButton.frame.maxX + TouchBarLayout.elementGap, y: 0, width: actionWidth, height: height)
             settingsButton.frame = NSRect(x: sidebarButton.frame.maxX + TouchBarLayout.elementGap, y: 0, width: actionWidth, height: height)
-            let navigationWidth = TouchBarLayout.navigationButtonWidth(for: width)
-            navigationBackButton.frame = NSRect(x: settingsButton.frame.maxX + TouchBarLayout.elementGap, y: 0, width: navigationWidth, height: height)
-            navigationForwardButton.frame = NSRect(x: navigationBackButton.frame.maxX + TouchBarLayout.navigationButtonGap, y: 0, width: navigationWidth, height: height)
+            navigationControl.frame = NSRect(
+                x: settingsButton.frame.maxX + TouchBarLayout.elementGap,
+                y: 0,
+                width: TouchBarLayout.navigationControlWidth(for: width),
+                height: height
+            )
             feedbackLabel.frame = NSRect(x: half, y: 0, width: half, height: height)
         }
     }
@@ -314,15 +421,14 @@ private final class TouchBarUsageView: NSView {
         newChatButton.isHidden = !showActions
         sidebarButton.isHidden = !showActions
         settingsButton.isHidden = !showActions
-        navigationBackButton.isHidden = !showActions
-        navigationForwardButton.isHidden = !showActions
+        navigationControl.isHidden = !showActions
     }
 
     private func configure(_ button: NSButton, action: Selector) {
         button.target = self
         button.action = action
         button.isBordered = false
-        button.font = .systemFont(ofSize: 11, weight: .semibold)
+        button.font = .systemFont(ofSize: 12, weight: .semibold)
         button.contentTintColor = .labelColor
         button.wantsLayer = true
         button.layer?.cornerRadius = 8
@@ -333,8 +439,6 @@ private final class TouchBarUsageView: NSView {
     @objc private func newChatTapped() { onNewChat?() }
     @objc private func sidebarTapped() { onToggleSidebar?() }
     @objc private func settingsTapped() { onOpenSettings?() }
-    @objc private func navigationBackTapped() { onNavigateBack?() }
-    @objc private func navigationForwardTapped() { onNavigateForward?() }
     @objc private func backTapped() { setExpanded(false) }
     @objc private func refreshTapped() { onRefresh?() }
 }
@@ -370,6 +474,7 @@ private final class FallbackReadoutView: NSView {
 final class TouchBarController: NSObject, NSTouchBarDelegate {
     private let touchBar = NSTouchBar()
     private let usageView: TouchBarUsageView
+    private let closeButton = TouchBarCloseButton(frame: .zero)
     private let fallbackView = FallbackReadoutView()
     private var fallbackItem: NSCustomTouchBarItem?
     private var fallbackRegistered = false
@@ -378,6 +483,7 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
     private var countdownTimer: Timer?
 
     var onRefresh: (() -> Void)?
+    var onClose: (() -> Void)?
     var onNewChat: (() -> Void)?
     var onToggleSidebar: (() -> Void)?
     var onOpenSettings: (() -> Void)?
@@ -388,6 +494,7 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
         usageView = TouchBarUsageView(frame: .zero)
         super.init()
         usageView.onRefresh = { [weak self] in self?.onRefresh?() }
+        closeButton.onClick = { [weak self] in self?.onClose?() }
         usageView.onNewChat = { [weak self] in self?.onNewChat?() }
         usageView.onToggleSidebar = { [weak self] in self?.onToggleSidebar?() }
         usageView.onOpenSettings = { [weak self] in self?.onOpenSettings?() }
@@ -395,6 +502,7 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
         usageView.onNavigateForward = { [weak self] in self?.onNavigateForward?() }
         touchBar.delegate = self
         touchBar.defaultItemIdentifiers = [.codexUsage]
+        touchBar.escapeKeyReplacementItemIdentifier = .codexClose
         touchBar.customizationIdentifier = NSTouchBar.CustomizationIdentifier("com.wyx.CodexTouchBar.usage")
     }
 
@@ -407,11 +515,21 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
     var supportsFullPresentation: Bool { SystemModalTouchBar.isAvailable }
 
     func touchBar(_ touchBar: NSTouchBar, makeItemForIdentifier identifier: NSTouchBarItem.Identifier) -> NSTouchBarItem? {
-        guard identifier == .codexUsage else { return nil }
-        let item = NSCustomTouchBarItem(identifier: identifier)
-        item.view = usageView
-        item.customizationLabel = "Codex 额度"
-        return item
+        switch identifier {
+        case .codexUsage:
+            let item = NSCustomTouchBarItem(identifier: identifier)
+            item.view = usageView
+            item.customizationLabel = "Codex 额度"
+            return item
+        case .codexClose:
+            let item = NSCustomTouchBarItem(identifier: identifier)
+            item.view = closeButton
+            item.visibilityPriority = .high
+            item.customizationLabel = "关闭 Touch Bar"
+            return item
+        default:
+            return nil
+        }
     }
 
     func update(snapshot: UsageSnapshot?, freshness: SnapshotFreshness, isRefreshing: Bool) {
