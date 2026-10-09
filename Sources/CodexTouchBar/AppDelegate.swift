@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let touchBar = TouchBarController()
     private let desktopActions = DesktopActions()
     private let panel = PanelController()
+    private lazy var buttonSettings = TouchBarSettingsController(preferences: .shared, desktopActions: desktopActions)
     private var statusItem: NSStatusItem!
     private let statusReadout = StatusUsageReadoutView()
     private var timer: Timer?
@@ -32,23 +33,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.onRefresh = { [weak self] in self?.store.refresh(includeResetCreditDetails: true) }
         panel.onToggleTouchBar = { [weak self] in self?.toggleTouchBar() }
         panel.onToggleLoginItem = { [weak self] in self?.toggleLoginItem() }
-        panel.onQuit = { NSApp.terminate(nil) }
+        panel.onCustomizeButtons = { [weak self] in self?.showButtonSettings() }
         touchBar.onRefresh = { [weak self] in self?.store.refresh() }
         touchBar.onClose = { Preferences.shared.touchBarEnabled = false }
-        touchBar.onNewChat = { [weak self] in
-            self?.performDesktopAction { try self?.desktopActions.newChat() }
-        }
-        touchBar.onToggleSidebar = { [weak self] in
-            self?.performDesktopAction { try self?.desktopActions.toggleSidebar() }
-        }
-        touchBar.onOpenSettings = { [weak self] in
-            self?.performDesktopAction { try self?.desktopActions.openSettings() }
-        }
-        touchBar.onNavigateBack = { [weak self] in
-            self?.performDesktopAction { try self?.desktopActions.navigateBack() }
-        }
-        touchBar.onNavigateForward = { [weak self] in
-            self?.performDesktopAction { try self?.desktopActions.navigateForward() }
+        touchBar.onAction = { [weak self] command in
+            self?.performDesktopAction { try self?.desktopActions.perform(command) }
         }
         NotificationCenter.default.addObserver(
             self,
@@ -56,6 +45,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: Preferences.didChange,
             object: nil
         )
+        NotificationCenter.default.addObserver(self, selector: #selector(buttonsChanged),
+                                               name: Preferences.buttonsDidChange, object: nil)
     }
 
     private func configureStatusItem() {
@@ -106,6 +97,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         restartTimer()
         updateTouchBarVisibility()
         pushState()
+    }
+
+    @objc private func buttonsChanged() {
+        touchBar.applyConfiguration(Preferences.shared.touchBarConfiguration)
+    }
+
+    @objc private func showButtonSettings() {
+        panel.close()
+        buttonSettings.show()
     }
 
     @objc private func frontmostApplicationChanged(_ notification: Notification) {
@@ -160,6 +160,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func contextMenu() -> NSMenu {
         let menu = NSMenu()
         menu.addItem(menuItem("刷新", #selector(refreshNow), key: "r"))
+        menu.addItem(menuItem("快捷操作…", #selector(showButtonSettings), key: ""))
         menu.addItem(menuItem(
             "Touch Bar：\(Preferences.shared.touchBarEnabled ? "关闭" : "开启")",
             #selector(toggleTouchBar),

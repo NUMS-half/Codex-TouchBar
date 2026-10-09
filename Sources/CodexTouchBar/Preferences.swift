@@ -3,13 +3,26 @@ import Foundation
 final class Preferences {
     static let shared = Preferences()
     static let didChange = Notification.Name("CodexTouchBar.PrefsDidChange")
+    static let buttonsDidChange = Notification.Name("CodexTouchBar.ButtonsDidChange")
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
+    private let buttonsKey = "touchBarButtons.v1"
     private let touchBarEnabledKey = "touchBarEnabled"
     private let refreshIntervalKey = "refreshIntervalSeconds"
     private let loginSetupAttemptedKey = "loginSetupAttempted"
 
     static let refreshIntervals: [TimeInterval] = [30, 60, 120, 300, 600]
+
+    init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+
+    var touchBarConfiguration: TouchBarConfiguration {
+        get { TouchBarConfiguration.decode(defaults.data(forKey: buttonsKey)) }
+        set {
+            guard newValue != touchBarConfiguration, let data = newValue.encoded() else { return }
+            defaults.set(data, forKey: buttonsKey)
+            NotificationCenter.default.post(name: Self.buttonsDidChange, object: self)
+        }
+    }
 
     var touchBarEnabled: Bool {
         get { defaults.object(forKey: touchBarEnabledKey) as? Bool ?? true }

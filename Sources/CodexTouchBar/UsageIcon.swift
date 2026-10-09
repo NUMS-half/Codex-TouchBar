@@ -55,7 +55,6 @@ final class StatusUsageReadoutView: NSView {
         [fiveHourNameLabel, weeklyNameLabel].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             $0.font = .monospacedDigitSystemFont(ofSize: 9, weight: .medium)
-            $0.textColor = .secondaryLabelColor
             $0.alignment = .right
             $0.lineBreakMode = .byClipping
         }
@@ -95,9 +94,30 @@ final class StatusUsageReadoutView: NSView {
             weeklyValueLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
             weeklyValueLabel.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+        updateAppearanceColors()
     }
 
     required init?(coder: NSCoder) { nil }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateAppearanceColors()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateAppearanceColors()
+    }
+
+    /// Follow the status button's inherited appearance, which can differ from
+    /// the app/popover appearance because of the menu bar background.
+    private func updateAppearanceColors() {
+        let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let color = NSColor(srgbRed: dark ? 0.88 : 0.12,
+                            green: dark ? 0.88 : 0.12,
+                            blue: dark ? 0.88 : 0.12, alpha: 1)
+        [fiveHourNameLabel, weeklyNameLabel].forEach { $0.textColor = color }
+    }
 
     // The containing NSStatusBarButton remains responsible for left and right
     // clicks; labels are visual only.

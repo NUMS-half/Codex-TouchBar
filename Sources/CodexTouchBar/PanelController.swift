@@ -91,18 +91,18 @@ final class PanelController: NSObject, NSPopoverDelegate {
     private let refreshIntervalPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let refreshIntervalHint = NSTextField(labelWithString: "Codex 前台；后台 5 分钟")
     private let refreshButton = NSButton(title: "刷新", target: nil, action: nil)
-    private let touchBarButton = NSButton(title: "Touch Bar：开", target: nil, action: nil)
-    private let loginButton = NSButton(title: "登录启动：开", target: nil, action: nil)
-    private let quitButton = NSButton(title: "退出", target: nil, action: nil)
+    private let touchBarButton = NSButton(title: "Touch Bar: 开", target: nil, action: nil)
+    private let loginButton = NSButton(title: "登录启动: 开", target: nil, action: nil)
+    private let customizeButton = NSButton(title: "快捷操作…", target: nil, action: nil)
     private let popover = NSPopover()
     private var outsideClickMonitor: Any?
 
     var onRefresh: (() -> Void)?
     var onToggleTouchBar: (() -> Void)?
     var onToggleLoginItem: (() -> Void)?
-    var onQuit: (() -> Void)?
+    var onCustomizeButtons: (() -> Void)?
 
-    private let panelSize = NSSize(width: 340, height: 370)
+    private let panelWidth: CGFloat = 340
 
     override init() {
         super.init()
@@ -170,9 +170,9 @@ final class PanelController: NSObject, NSPopoverDelegate {
         touchBarButton.action = #selector(toggleTouchBar)
         loginButton.target = self
         loginButton.action = #selector(toggleLoginItem)
-        quitButton.target = self
-        quitButton.action = #selector(quit)
-        [refreshButton, touchBarButton, loginButton, quitButton].forEach {
+        customizeButton.target = self
+        customizeButton.action = #selector(customizeButtons)
+        [refreshButton, touchBarButton, loginButton, customizeButton].forEach {
             $0.bezelStyle = .rounded
             $0.controlSize = .small
         }
@@ -183,10 +183,25 @@ final class PanelController: NSObject, NSPopoverDelegate {
     func show(relativeTo positioningRect: NSRect, of view: NSView) {
         if isShown { close(); return }
 
+        let backdrop = makeContentView()
+        let size = backdrop.fittingSize
+        backdrop.frame = NSRect(origin: .zero, size: size)
+        let controller = NSViewController()
+        controller.view = backdrop
+        controller.preferredContentSize = size
+        popover.contentViewController = controller
+        popover.contentSize = size
+        popover.show(relativeTo: positioningRect, of: view, preferredEdge: .minY)
+        installOutsideClickMonitor()
+    }
+
+    /// Shared with offscreen UI checks. Exact vertical constraints determine
+    /// the panel height, so adding an entry cannot leave a floating empty row.
+    func makeContentView() -> NSView {
         // NSPopover owns the native material, corner radius, and shadow.  The
         // content view only supplies the panel's layout, so it never needs to
         // simulate a window with a transparent borderless NSPanel.
-        let backdrop = NSVisualEffectView(frame: NSRect(origin: .zero, size: panelSize))
+        let backdrop = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: 380))
         backdrop.material = .popover
         backdrop.blendingMode = .withinWindow
         backdrop.state = .active
@@ -225,7 +240,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         errorBanner.alignment = .centerY
         errorBanner.spacing = 6
         errorBanner.translatesAutoresizingMaskIntoConstraints = false
-        errorLabel.widthAnchor.constraint(lessThanOrEqualToConstant: panelSize.width - 100).isActive = true
+        errorLabel.widthAnchor.constraint(lessThanOrEqualToConstant: panelWidth - 100).isActive = true
         errorBanner.isHidden = currentErrorMessage == nil
         errorBannerView = errorBanner
 
@@ -242,16 +257,16 @@ final class PanelController: NSObject, NSPopoverDelegate {
         refreshSettings.spacing = 7
         refreshSettings.translatesAutoresizingMaskIntoConstraints = false
 
-        let actions = NSStackView(views: [refreshButton, touchBarButton, loginButton, spacer(), quitButton])
+        let actions = NSStackView(views: [refreshButton, touchBarButton, loginButton, customizeButton])
         actions.orientation = .horizontal
         actions.alignment = .centerY
-        actions.spacing = 3
+        actions.distribution = .equalSpacing
+        actions.spacing = 6
         actions.translatesAutoresizingMaskIntoConstraints = false
 
         [header, cards, details, refreshSettings, actions].forEach(backdrop.addSubview)
         NSLayoutConstraint.activate([
-            backdrop.widthAnchor.constraint(equalToConstant: panelSize.width),
-            backdrop.heightAnchor.constraint(equalToConstant: panelSize.height),
+            backdrop.widthAnchor.constraint(equalToConstant: panelWidth),
             header.topAnchor.constraint(equalTo: backdrop.topAnchor, constant: 16),
             header.leadingAnchor.constraint(equalTo: backdrop.leadingAnchor, constant: 16),
             header.trailingAnchor.constraint(equalTo: backdrop.trailingAnchor, constant: -16),
@@ -267,17 +282,11 @@ final class PanelController: NSObject, NSPopoverDelegate {
             refreshSettings.trailingAnchor.constraint(equalTo: header.trailingAnchor),
             actions.leadingAnchor.constraint(equalTo: header.leadingAnchor),
             actions.trailingAnchor.constraint(equalTo: header.trailingAnchor),
-            actions.topAnchor.constraint(greaterThanOrEqualTo: refreshSettings.bottomAnchor, constant: 10),
+            actions.topAnchor.constraint(equalTo: refreshSettings.bottomAnchor, constant: 10),
             actions.bottomAnchor.constraint(equalTo: backdrop.bottomAnchor, constant: -13),
         ])
 
-        let controller = NSViewController()
-        controller.view = backdrop
-        controller.preferredContentSize = panelSize
-        popover.contentViewController = controller
-        popover.contentSize = panelSize
-        popover.show(relativeTo: positioningRect, of: view, preferredEdge: .minY)
-        installOutsideClickMonitor()
+        return backdrop
     }
 
     func close() {
@@ -307,8 +316,13 @@ final class PanelController: NSObject, NSPopoverDelegate {
         refreshIntervalPopup.selectItem(withTag: Int(Preferences.shared.refreshInterval))
         refreshButton.title = isRefreshing ? "刷新…" : "刷新"
         refreshButton.isEnabled = !isRefreshing
-        touchBarButton.title = "Touch Bar：\(Preferences.shared.touchBarEnabled ? "开" : "关")"
-        loginButton.title = "登录启动：\(SMAppService.mainApp.status == .enabled ? "开" : "关")"
+        touchBarButton.title = "Touch Bar: \(Preferences.shared.touchBarEnabled ? "开" : "关")"
+        loginButton.title = "登录启动: \(SMAppService.mainApp.status == .enabled ? "开" : "关")"
+        if popover.isShown, let controller = popover.contentViewController {
+            let size = controller.view.fittingSize
+            controller.preferredContentSize = size
+            popover.contentSize = size
+        }
     }
 
     private func creditText(_ snapshot: UsageSnapshot?) -> String {
@@ -442,7 +456,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
     }
     @objc private func toggleTouchBar() { onToggleTouchBar?() }
     @objc private func toggleLoginItem() { onToggleLoginItem?() }
-    @objc private func quit() { onQuit?() }
+    @objc private func customizeButtons() { onCustomizeButtons?() }
 
     func popoverShouldDetach(_ popover: NSPopover) -> Bool { false }
 

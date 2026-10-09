@@ -237,57 +237,10 @@ enum TouchBarLayout {
     }
 }
 
-private final class TouchBarNavigationControl: NSView {
-    private let backButton = NSButton(title: "←", target: nil, action: nil)
-    private let forwardButton = NSButton(title: "→", target: nil, action: nil)
-
-    var onBack: (() -> Void)?
-    var onForward: (() -> Void)?
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        configure(backButton, action: #selector(backTapped), label: "后退")
-        configure(forwardButton, action: #selector(forwardTapped), label: "前进")
-    }
-
-    required init?(coder: NSCoder) { nil }
-
-    override func layout() {
-        super.layout()
-        let segmentWidth = bounds.width / 2
-        backButton.frame = NSRect(x: 0, y: 0, width: segmentWidth, height: bounds.height)
-        forwardButton.frame = NSRect(x: segmentWidth, y: 0, width: segmentWidth, height: bounds.height)
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        NSColor.labelColor.withAlphaComponent(0.10).setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).fill()
-        NSColor.labelColor.withAlphaComponent(0.22).setFill()
-        NSBezierPath(rect: NSRect(x: bounds.midX - 0.5, y: 5, width: 1, height: bounds.height - 10)).fill()
-    }
-
-    private func configure(_ button: NSButton, action: Selector, label: String) {
-        button.target = self
-        button.action = action
-        button.isBordered = false
-        button.font = .systemFont(ofSize: 17, weight: .medium)
-        button.contentTintColor = .labelColor
-        button.setAccessibilityLabel(label)
-        addSubview(button)
-    }
-
-    @objc private func backTapped() { onBack?() }
-    @objc private func forwardTapped() { onForward?() }
-}
-
 private final class TouchBarUsageView: NSView {
     private let fiveHour = TouchBarQuotaCard(kind: .fiveHour)
     private let weekly = TouchBarQuotaCard(kind: .weekly)
-    private let newChatButton = NSButton(title: "＋ 新对话", target: nil, action: nil)
-    private let sidebarButton = NSButton(title: "侧边栏", target: nil, action: nil)
-    private let settingsButton = NSButton(title: "设置", target: nil, action: nil)
-    private let navigationControl = TouchBarNavigationControl(frame: .zero)
+    private let actionSlots = (0..<TouchBarConfiguration.slotCount).map { _ in TouchBarActionSlotView(frame: .zero) }
     private let backButton = NSButton(title: "‹", target: nil, action: nil)
     private let refreshButton = NSButton(title: "↻", target: nil, action: nil)
     private let feedbackLabel = NSTextField(labelWithString: "")
@@ -297,11 +250,7 @@ private final class TouchBarUsageView: NSView {
     private var expanded = false
     private var feedbackGeneration = 0
 
-    var onNewChat: (() -> Void)?
-    var onToggleSidebar: (() -> Void)?
-    var onOpenSettings: (() -> Void)?
-    var onNavigateBack: (() -> Void)?
-    var onNavigateForward: (() -> Void)?
+    var onAction: ((DesktopCommand) -> Void)?
     var onRefresh: (() -> Void)?
 
     override init(frame frameRect: NSRect) {
@@ -313,12 +262,11 @@ private final class TouchBarUsageView: NSView {
         fiveHour.onClick = { [weak self] in self?.setExpanded(true) }
         weekly.onClick = { [weak self] in self?.setExpanded(true) }
         [fiveHour, weekly].forEach(addSubview)
-        configure(newChatButton, action: #selector(newChatTapped))
-        configure(sidebarButton, action: #selector(sidebarTapped))
-        configure(settingsButton, action: #selector(settingsTapped))
-        navigationControl.onBack = { [weak self] in self?.onNavigateBack?() }
-        navigationControl.onForward = { [weak self] in self?.onNavigateForward?() }
-        addSubview(navigationControl)
+        actionSlots.forEach { slot in
+            slot.onAction = { [weak self] command in self?.onAction?(command) }
+            addSubview(slot)
+        }
+        applyConfiguration(Preferences.shared.touchBarConfiguration)
         configure(backButton, action: #selector(backTapped))
         configure(refreshButton, action: #selector(refreshTapped))
         backButton.font = .systemFont(ofSize: 20, weight: .medium)
@@ -356,15 +304,12 @@ private final class TouchBarUsageView: NSView {
             fiveHour.frame = NSRect(x: 0, y: 0, width: cardWidth, height: height)
             weekly.frame = NSRect(x: fiveHour.frame.maxX + TouchBarLayout.elementGap, y: 0, width: cardWidth, height: height)
             let actionWidth = TouchBarLayout.actionWidth(for: width)
-            newChatButton.frame = NSRect(x: half + TouchBarLayout.actionInset, y: 0, width: actionWidth, height: height)
-            sidebarButton.frame = NSRect(x: newChatButton.frame.maxX + TouchBarLayout.elementGap, y: 0, width: actionWidth, height: height)
-            settingsButton.frame = NSRect(x: sidebarButton.frame.maxX + TouchBarLayout.elementGap, y: 0, width: actionWidth, height: height)
-            navigationControl.frame = NSRect(
-                x: settingsButton.frame.maxX + TouchBarLayout.elementGap,
-                y: 0,
-                width: TouchBarLayout.navigationControlWidth(for: width),
-                height: height
-            )
+            for (index, slot) in actionSlots.enumerated() {
+                slot.frame = NSRect(
+                    x: half + TouchBarLayout.actionInset + CGFloat(index) * (actionWidth + TouchBarLayout.elementGap),
+                    y: 0, width: actionWidth, height: height
+                )
+            }
             feedbackLabel.frame = NSRect(x: half, y: 0, width: half, height: height)
         }
     }
@@ -374,6 +319,13 @@ private final class TouchBarUsageView: NSView {
         self.refreshing = refreshing
         isStale = freshness.isStale
         updateCards()
+    }
+
+    func applyConfiguration(_ configuration: TouchBarConfiguration) {
+        for (slot, binding) in zip(actionSlots, configuration.slots) { slot.update(binding) }
+        feedbackGeneration += 1
+        feedbackLabel.isHidden = true
+        updateActionVisibility()
     }
 
     func refreshCountdown() {
@@ -418,10 +370,7 @@ private final class TouchBarUsageView: NSView {
 
     private func updateActionVisibility() {
         let showActions = !expanded && feedbackLabel.isHidden
-        newChatButton.isHidden = !showActions
-        sidebarButton.isHidden = !showActions
-        settingsButton.isHidden = !showActions
-        navigationControl.isHidden = !showActions
+        actionSlots.forEach { $0.isHidden = !showActions }
     }
 
     private func configure(_ button: NSButton, action: Selector) {
@@ -436,9 +385,6 @@ private final class TouchBarUsageView: NSView {
         addSubview(button)
     }
 
-    @objc private func newChatTapped() { onNewChat?() }
-    @objc private func sidebarTapped() { onToggleSidebar?() }
-    @objc private func settingsTapped() { onOpenSettings?() }
     @objc private func backTapped() { setExpanded(false) }
     @objc private func refreshTapped() { onRefresh?() }
 }
@@ -484,22 +430,14 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
 
     var onRefresh: (() -> Void)?
     var onClose: (() -> Void)?
-    var onNewChat: (() -> Void)?
-    var onToggleSidebar: (() -> Void)?
-    var onOpenSettings: (() -> Void)?
-    var onNavigateBack: (() -> Void)?
-    var onNavigateForward: (() -> Void)?
+    var onAction: ((DesktopCommand) -> Void)?
 
     override init() {
         usageView = TouchBarUsageView(frame: .zero)
         super.init()
         usageView.onRefresh = { [weak self] in self?.onRefresh?() }
         closeButton.onClick = { [weak self] in self?.onClose?() }
-        usageView.onNewChat = { [weak self] in self?.onNewChat?() }
-        usageView.onToggleSidebar = { [weak self] in self?.onToggleSidebar?() }
-        usageView.onOpenSettings = { [weak self] in self?.onOpenSettings?() }
-        usageView.onNavigateBack = { [weak self] in self?.onNavigateBack?() }
-        usageView.onNavigateForward = { [weak self] in self?.onNavigateForward?() }
+        usageView.onAction = { [weak self] command in self?.onAction?(command) }
         touchBar.delegate = self
         touchBar.defaultItemIdentifiers = [.codexUsage]
         touchBar.escapeKeyReplacementItemIdentifier = .codexClose
@@ -536,6 +474,10 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
         assert(Thread.isMainThread)
         usageView.update(snapshot: snapshot, refreshing: isRefreshing, freshness: freshness)
         fallbackView.update(snapshot)
+    }
+
+    func applyConfiguration(_ configuration: TouchBarConfiguration) {
+        usageView.applyConfiguration(configuration)
     }
 
     func showFeedback(_ message: String) {
