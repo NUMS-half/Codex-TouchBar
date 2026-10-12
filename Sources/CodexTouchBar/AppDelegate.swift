@@ -7,21 +7,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let touchBar = TouchBarController()
     private let desktopActions = DesktopActions()
     private let panel = PanelController()
-    private lazy var buttonSettings = TouchBarSettingsController(preferences: .shared, desktopActions: desktopActions)
+    private let usageNotifications = UsageNotificationService()
+    private lazy var usageMonitoring = UsageMonitoringController(sender: usageNotifications)
+    private var historyWindow: UsageHistoryWindowController?
+    private lazy var settingsWindow = SettingsWindowController(service: usageNotifications, desktopActions: desktopActions)
     private var statusItem: NSStatusItem!
     private let statusReadout = StatusUsageReadoutView()
     private var timer: Timer?
-    private var configurationError: String?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         configureStatusItem()
         configureCallbacks()
+        store.onSuccessfulRefresh = { [weak self] in self?.usageMonitoring.consume($0) }
+        usageMonitoring.onChange = { [weak self] in self?.historyWindow?.reload() }
+        usageNotifications.onOpenHistory = { [weak self] kind in
+            self?.openHistory(kind: kind)
+        }
+        usageMonitoring.start()
         observeWorkspace()
         configureDefaultLoginItem()
         store.onChange = { [weak self] in self?.pushState() }
         pushState()
         restartTimer()
         store.refresh()
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        timer?.invalidate()
+        Task { await usageMonitoring.waitForPendingWrites(); sender.reply(toApplicationShouldTerminate: true) }
+        return .terminateLater
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -31,9 +45,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func configureCallbacks() {
         panel.onRefresh = { [weak self] in self?.store.refresh(includeResetCreditDetails: true) }
-        panel.onToggleTouchBar = { [weak self] in self?.toggleTouchBar() }
-        panel.onToggleLoginItem = { [weak self] in self?.toggleLoginItem() }
-        panel.onCustomizeButtons = { [weak self] in self?.showButtonSettings() }
+        panel.onShowHistory = { [weak self] in self?.showHistory() }
+        panel.onShowSettings = { [weak self] in self?.showSettings() }
+        panel.onQuit = { [weak self] in self?.quit() }
         touchBar.onRefresh = { [weak self] in self?.store.refresh() }
         touchBar.onClose = { Preferences.shared.touchBarEnabled = false }
         touchBar.onAction = { [weak self] command in
@@ -47,6 +61,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         NotificationCenter.default.addObserver(self, selector: #selector(buttonsChanged),
                                                name: Preferences.buttonsDidChange, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(alertsChanged),
+                                               name: Preferences.alertsDidChange, object: nil)
     }
 
     private func configureStatusItem() {
@@ -103,9 +119,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         touchBar.applyConfiguration(Preferences.shared.touchBarConfiguration)
     }
 
-    @objc private func showButtonSettings() {
+    @objc private func alertsChanged() { usageMonitoring.configure() }
+    @objc private func showHistory() { openHistory() }
+    private func openHistory(kind: UsageWindowKind? = nil) {
         panel.close()
-        buttonSettings.show()
+        if historyWindow == nil {
+            historyWindow = UsageHistoryWindowController(monitor: usageMonitoring,
+                snapshot: { [weak self] in self?.store.snapshot },
+                isStale: { [weak self] in self?.store.freshness.isStale ?? true })
+        }
+        historyWindow?.show(kind: kind)
+    }
+    @objc private func showSettings() {
+        panel.close()
+        settingsWindow.show()
     }
 
     @objc private func frontmostApplicationChanged(_ notification: Notification) {
@@ -160,17 +187,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func contextMenu() -> NSMenu {
         let menu = NSMenu()
         menu.addItem(menuItem("刷新", #selector(refreshNow), key: "r"))
-        menu.addItem(menuItem("快捷操作…", #selector(showButtonSettings), key: ""))
-        menu.addItem(menuItem(
-            "Touch Bar：\(Preferences.shared.touchBarEnabled ? "关闭" : "开启")",
-            #selector(toggleTouchBar),
-            key: ""
-        ))
-        menu.addItem(menuItem(
-            "登录启动：\(SMAppService.mainApp.status == .enabled ? "关闭" : "开启")",
-            #selector(toggleLoginItem),
-            key: ""
-        ))
+        menu.addItem(menuItem("额度曲线…", #selector(showHistory), key: ""))
+        menu.addItem(menuItem("设置…", #selector(showSettings), key: ","))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(menuItem("退出", #selector(quit), key: "q"))
         return menu
@@ -183,24 +201,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func refreshNow() { store.refresh() }
-
-    @objc private func toggleTouchBar() {
-        Preferences.shared.touchBarEnabled.toggle()
-    }
-
-    @objc private func toggleLoginItem() {
-        do {
-            if SMAppService.mainApp.status == .enabled {
-                try SMAppService.mainApp.unregister()
-            } else {
-                try SMAppService.mainApp.register()
-            }
-            configurationError = nil
-        } catch {
-            configurationError = "登录启动设置失败：\(error.localizedDescription)"
-        }
-        pushState()
-    }
 
     @objc private func quit() { NSApp.terminate(nil) }
 
@@ -217,7 +217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.update(
             snapshot: snapshot,
             freshness: store.freshness,
-            error: store.errorMessage ?? configurationError,
+            error: store.errorMessage,
             isRefreshing: store.isRefreshing
         )
         touchBar.update(snapshot: snapshot, freshness: store.freshness, isRefreshing: store.isRefreshing)

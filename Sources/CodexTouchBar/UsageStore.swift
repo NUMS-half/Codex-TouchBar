@@ -13,6 +13,7 @@ final class UsageStore {
     private var detailedRefreshPending = false
 
     var onChange: (() -> Void)?
+    var onSuccessfulRefresh: ((UsageSnapshot) -> Void)?
 
     init(
         provider: any UsageProvider = CodexUsageService(),
@@ -48,6 +49,7 @@ final class UsageStore {
                 self.freshness = .live
                 self.errorMessage = nil
                 if let snapshot = self.snapshot { self.cache.save(snapshot) }
+                self.onSuccessfulRefresh?(value)
             } catch {
                 let message = error.localizedDescription
                 self.errorMessage = message

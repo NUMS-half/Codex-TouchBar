@@ -1,64 +1,213 @@
-# Codex TouchBar
+<div align="center">
+  <img src="docs/images/app-icon.png" width="96" alt="Codex TouchBar 图标">
+  <h1>Codex TouchBar</h1>
+  <p><strong>抬眼看额度，伸手做操作。</strong></p>
+  <p>在 macOS 菜单栏和 Touch Bar 查看 Codex 剩余额度，设置提醒，回看变化。</p>
+  <p>
+    <a href="https://github.com/NUMS-half/Codex-TouchBar/releases"><img src="https://img.shields.io/github/v/release/NUMS-half/Codex-TouchBar?label=Release&amp;color=007AFF" alt="GitHub 最新版本"></a>
+    <img src="https://img.shields.io/badge/macOS-14%2B-333333?logo=apple&amp;logoColor=white" alt="macOS 14 或更高版本">
+    <img src="https://img.shields.io/badge/下载包-Apple%20Silicon-555555" alt="下载包支持 Apple Silicon">
+    <a href="https://github.com/NUMS-half/Codex-TouchBar/stargazers"><img src="https://img.shields.io/github/stars/NUMS-half/Codex-TouchBar?style=flat&amp;color=E5A000" alt="GitHub Stars"></a>
+  </p>
+  <p>
+    <a href="#快速开始">快速开始</a> ·
+    <a href="#功能与界面">功能与界面</a> ·
+    <a href="#常见问题">常见问题</a> ·
+    <a href="CHANGELOG.md">更新记录</a> ·
+    <a href="https://github.com/NUMS-half/Codex-TouchBar/issues">反馈问题</a>
+  </p>
+</div>
 
-一个面向个人使用的原生 macOS 菜单栏应用：在带实体 Touch Bar 的 MacBook Pro 上查看 Codex 的 5 小时与每周**剩余额度**。
+<p align="center">
+  <img src="docs/images/menu-panel.png" width="340" alt="菜单栏详情面板：5H和周额度、刷新图标，以及额度曲线、设置、退出入口">
+</p>
+<p align="center"><sub>原生界面预览。本文截图中的额度、曲线和设置均为示例。</sub></p>
 
-## 功能
+## 你可以用它做什么
 
-- 菜单栏使用紧凑双行布局，同时显示 `5H` 与 `周` 的剩余百分比；点击打开详情，右键显示快捷操作。
-- Codex Desktop 位于前台时，Touch Bar 左侧固定显示与系统按钮同尺寸的关闭按钮；App 控制区左半显示两张额度卡，右半默认提供“新对话”“侧边栏”“设置”，以及左右两侧可分别点击的分段导航按钮。关闭按钮会同步关闭菜单中的 Touch Bar 开关；右侧系统 Control Strip 保持可用。
-- 点击额度卡可展开查看完整重置时间，并通过独立按钮刷新或返回；切换到其他应用后恢复默认布局。
-- 新对话、侧边栏、设置、后退、前进和临时聊天在点击时通过辅助功能触发 ChatGPT 原生菜单项；修改或清除快捷键后仍调用对应菜单操作。菜单项不可用时在 Touch Bar 上显示简短提示。首次使用操作按钮时需授予辅助功能权限。
-- “临时聊天”“标记未读”始终可在快捷操作设置中的“常用功能”里选择，支持任意槽位及自定义名称。标记未读是应用内部命令，在点击时只读取 ChatGPT 独立的 `keybindings.json` 快捷键设置，默认使用 `⌘⇧U`，自定义后使用当前绑定。仅读取快捷键设置，不增加后台轮询；只向前台 ChatGPT 进程发送按键。清除绑定、配置损坏、冲突或暂不支持的组合会提示不可用，不退回旧组合键。目前支持单段且含 Command、Control 或 Option 的组合，多段组合及纯文字键不发送。
-- 菜单栏面板和右键菜单中的“快捷操作…”可打开独立设置窗口。四个等宽按钮区均可选择常用功能或“后退／前进”组合，并可修改普通按钮的显示名称；保存后生效，取消或关闭窗口不会修改配置，恢复默认也需保存。
-- “更多 ChatGPT 功能”仅收录 ChatGPT 专属原生菜单命令，例如聊天内查找、切换聊天、底部面板、终端和快捷键设置；具体选项取决于当前版本实际提供的直接菜单项。复制、粘贴、撤销、窗口缩放、全屏等通用命令不会列入，也不会展开最近聊天等子菜单。旧配置里的通用命令仅恢复其所在槽位的默认值，其他配置保留。
-- 当前读取的是原生菜单功能，完整的 ChatGPT 快捷键目录尚未接入。搜索聊天、归档、置顶等功能可能属于隐藏菜单命令，或只在命令面板、特定视图中提供，因此即使 ChatGPT 支持对应快捷键，也未必出现在候选列表。列表为空时常用选项仍保留；读取失败的具体原因显示在窗口底部，手动刷新不能突破菜单读取范围。
-- “刷新 ChatGPT 功能”会重新读取可用功能、菜单名称和当前快捷键。仅在打开按钮设置窗口或手动点击时读取，不增加后台轮询；通常无需手动刷新。未运行 ChatGPT、缺少辅助功能权限或菜单未加载时，常用功能仍可设置，打开 ChatGPT、授权或打开其菜单后可重试。当前禁用的功能仍可配置，执行时重新检查状态。
-- 原生菜单功能的快捷键只用于显示，按钮直接执行菜单项，修改或清除快捷键后依然有效；仅在 ChatGPT 位于前台时执行。无法重新定位的自选命令会提示暂不可用，用户可刷新列表后重新选择。标记未读按上面的当前快捷键绑定规则执行。ChatGPT 的功能及快捷键说明见[官方命令文档](https://learn.chatgpt.com/docs/reference/commands)。
-- 启动、Codex 获得焦点、打开菜单和系统唤醒时会立即刷新；展开额度卡后的“刷新”及菜单栏“刷新”也可手动更新。
-- Codex 位于前台时默认每 30 秒刷新，后台固定每 5 分钟刷新。可在详情中将前台自动刷新设为 30 秒、1 分钟、2 分钟、5 分钟或 10 分钟。
-- 详情面板显示积分、可用重置次数及服务端提供的最近到期时间；异常提示保持紧凑，完整错误可展开查看。
-- 额度、进度条和菜单栏数值统一按四色状态展示：红、橙、黄、绿。
-- 支持登录启动、睡眠唤醒恢复、24 小时本地缓存与失效标记。
-- Touch Bar 私有接口不可用时，自动退回紧凑 Control Strip 摘要；菜单栏功能不受影响。
+| 功能 | 日常用途 |
+| :--- | :--- |
+| **随时看额度** | 菜单栏同时显示5H、周剩余百分比，点击查看重置时间和额度详情。 |
+| **Touch Bar 快捷操作** | ChatGPT在前台时显示额度卡和四个可自定义按钮，系统亮度、音量控件继续可用。 |
+| **按需提醒** | 5H和周额度分别设置低额、恢复阈值，避免频繁打开用量页面。 |
+| **回看额度变化** | 查看5H最近48小时、周额度最近14天的记录，知道额度何时消耗或增加。 |
 
-## 要求
+> [!NOTE]
+> 本文功能与界面对应 **v2.2.0**。下载及升级说明见 [Release说明](https://github.com/NUMS-half/Codex-TouchBar/releases/tag/v2.2.0)；源码安装方式见下方。
 
-- macOS 14 或更高版本。
-- 带实体 Touch Bar 的 MacBook Pro（菜单栏功能不依赖 Touch Bar）。
-- 已登录 Codex Desktop / ChatGPT，并且其自带 `codex` 可执行文件可用。
-- Swift Command Line Tools 或完整 Xcode，用于从源码构建。
+## 快速开始
 
-## 构建与安装
+### 1. 确认使用条件
+
+- **macOS 14或更高版本**。目前发布的安装包面向Apple Silicon（arm64）。
+- 已安装并登录支持Codex的 **ChatGPT／Codex桌面App**。
+- Touch Bar功能需要带**实体Touch Bar**的Mac；没有Touch Bar也可使用菜单栏、额度曲线和提醒。
+
+### 2. 安装并启动
+
+1. 前往 **[下载最新版本](https://github.com/NUMS-half/Codex-TouchBar/releases/latest)**，下载并解压 `CodexTouchBar-…-macos-arm64.zip`。
+2. 在Finder按 `⌘⇧G`，前往 `~/Applications`。若文件夹不存在，先在个人文件夹中创建名为 `Applications` 的文件夹。
+3. 将 `CodexTouchBar.app` 放入该目录，双击打开。后续更新请保持同一安装位置。
+
+应用启动后常驻**菜单栏**，不会出现Dock图标。
+
+<details>
+<summary><strong>从源码安装</strong></summary>
+
+需要Git和Xcode Command Line Tools。首次配置可运行 `xcode-select --install`，并按系统提示完成安装。
 
 ```bash
-./build.sh
+git clone https://github.com/NUMS-half/Codex-TouchBar.git
+cd Codex-TouchBar
+./tools/setup-local-signing.sh
 ./install.sh
 ```
 
-`build.sh` 会运行测试目标、构建 release 应用、生成图标，并在 `build/CodexTouchBar.app` 输出 ad-hoc 签名的应用。`install.sh` 会退出旧进程，再安装到 `~/Applications/CodexTouchBar.app` 并启动新版本。
+签名设置只需完成一次，系统可能要求确认这张本机证书的代码签名用途。以后在同一目录更新源码，再运行 `./install.sh` 即可。
 
-也可执行只读诊断：
+构建与安装使用固定签名身份，减少更新后辅助功能授权失效的问题。签名资料请妥善保留；更多构建、签名和诊断说明见 [开发指南](docs/DEVELOPMENT.md)。
 
-```bash
-build/CodexTouchBar.app/Contents/MacOS/CodexTouchBar --self-test
-```
+</details>
 
-在实体设备上验收时，请确认：Codex 前台时两卡占 App 控制区左半、三个宽按钮与两个窄箭头易点，右侧系统控制仍在；额度展开、返回与刷新正常；切换到其他应用后额度卡隐藏。测试新对话、侧边栏、设置、后退、前进，以及修改快捷键、辅助功能权限拒绝和睡眠唤醒。
+### 3. 完成首次设置
 
-## 数据与隐私
+1. **点击菜单栏图标**：查看5H与周剩余额度，标题旁的刷新图标在查询时旋转。
+2. **打开“设置… → 通用”**：按需开启Touch Bar、登录启动，并选择前台刷新间隔。
+3. **使用Touch Bar操作按钮**：首次使用时，按提示在「系统设置 → 隐私与安全性 → 辅助功能」允许安装版CodexTouchBar。
+4. **打开“额度提醒”页**：提醒默认关闭。开启需要的提醒、设置阈值，并允许系统通知。
 
-应用仅通过本机 `codex app-server --stdio` 的只读 `account/rateLimits/read` 请求读取服务端额度。
+> [!TIP]
+> 默认前台每30秒刷新，后台每5分钟刷新。打开菜单栏或点击刷新图标也会立即查询；图标至少短暂旋转一次，让快速查询也有清晰反馈。
 
-- 不读取 `auth.json`、Keychain 或登录凭据。
-- 不直接请求 ChatGPT 私有 HTTP 接口。
-- 不记录原始 JSON-RPC 响应、任务内容或账户标识。
-- 仅缓存界面展示所需字段，最长使用 24 小时；读取失败时保留旧值并标记为过期。
-- 应用不读取或修改聊天输入内容，也不自行录音或转写。
+## 功能与界面
 
-## 开发
+### 菜单栏：一眼看清还剩多少
 
-项目使用 Swift Package Manager 与 AppKit，没有第三方依赖。
+`5H`与`周`都显示**剩余百分比**。点击打开详情，底部是“额度曲线…｜设置…｜退出”；右键也能快速访问这些入口。
 
-## 发布
+数字和进度条采用一致的颜色：🔴 0–10% · 🟠 11–30% · 🟡 31–60% · 🟢 61–100%。查询失败时保留上次结果并显示过期提示，便于区分最新额度与旧数据。
 
-当前版本为 `v2.1.2`。发布前请阅读 [RELEASING.md](RELEASING.md)：它说明如何生成带 SHA-256 校验文件的 arm64 应用压缩包、创建 Git 标签并在 GitHub 发布 Release。
+### Touch Bar：额度与操作放在手边
+
+ChatGPT位于前台时，左侧显示两张额度卡，右侧默认是：
+
+`新对话｜侧边栏｜设置｜← / →`
+
+- 点击额度卡，展开完整重置时间；可刷新或返回。
+- 点击最左侧关闭按钮，同步关闭设置中的Touch Bar开关。
+- 四个操作槽位都可换功能、改短名称，也能放置“后退／前进”组合。
+- 常用候选包括新对话、临时聊天、侧边栏、设置、后退、前进和标记未读。
+
+在 **设置 → 快捷操作** 中预览并保存。切换页面会保留草稿；取消还原已保存值，关闭窗口丢弃未保存修改。
+
+<p align="center">
+  <img src="docs/images/shortcut-editor.png" width="620" alt="快捷操作编辑区：四个按钮的预览、功能选择、显示名称，以及保存和取消">
+</p>
+
+### 统一设置：三个页面，一处管理
+
+| 页面 | 可以设置什么 | 何时生效 |
+| :--- | :--- | :--- |
+| **通用** | Touch Bar显示、登录启动、前台刷新间隔 | 即时生效 |
+| **额度提醒** | 四个提醒开关及各自的百分比阈值 | 自动保存 |
+| **快捷操作** | 四个Touch Bar槽位的功能和名称 | 点击保存后生效 |
+
+<p align="center">
+  <img src="docs/images/settings-general.png" width="600" alt="通用设置页：Touch Bar、登录启动与自动刷新分组">
+</p>
+
+### 额度提醒：阈值由你决定
+
+5H与周额度分别设置，范围为 **1%～100%**，支持输入或上下微调。
+
+| 提醒 | 默认阈值 | 示例 |
+| :--- | :--- | :--- |
+| **低额提醒** | 低于20% | 从20%降到19%时提醒；持续低额不反复通知。 |
+| **恢复提醒** | 达到100% | 达到目标后，经后续一次成功查询确认仍达标，再提醒一次。 |
+
+首次开启或修改阈值后，从下一次成功查询建立基线，已有低额或高额状态不会立即补发。通知遵循系统通知和专注模式，不播放自定义提示音；点击通知可打开对应额度曲线。
+
+<p align="center">
+  <img src="docs/images/settings-alerts.png" width="600" alt="额度提醒页：5H与周各自的开关、低额阈值和恢复阈值，适配暗色模式">
+</p>
+
+### 额度曲线：查看过去的实际变化
+
+在菜单面板点击 **“额度曲线…”**，切换5H最近48小时、周额度最近14天。记录保存在本机，退出或重启后仍可查看。
+
+- **实线**连接连续查询记录；**虚线**连接采样空档或变化区段，是两端记录之间的估计。
+- 鼠标悬停显示最近的实测时间与余额；第一次记录之前不补画历史。
+- “额度回升”只说明余额增加，不判断是周期重置、官方调整还是使用了重置机会。
+
+<p align="center">
+  <img src="docs/images/quota-history.png" width="700" alt="额度变化曲线：剩余额度纵轴、时间横轴、实线记录、虚线连接和额度回升标记">
+</p>
+
+## 常见问题
+
+<details>
+<summary><strong>为什么没有Dock图标？如何退出？</strong></summary>
+
+这是菜单栏应用。点击菜单栏图标，在详情底部选择“退出”，或使用右键菜单中的“退出”。
+
+</details>
+
+<details>
+<summary><strong>为什么Touch Bar没有显示？</strong></summary>
+
+请检查Mac是否有实体Touch Bar、设置中的Touch Bar开关是否开启，并让ChatGPT桌面App位于前台。切换到其他App时，本工具的Touch Bar内容会隐藏。
+
+</details>
+
+<details>
+<summary><strong>为什么快捷操作不可用，或修改快捷键后有差异？</strong></summary>
+
+先确认ChatGPT位于前台，且CodexTouchBar已获辅助功能权限。部分功能只在特定聊天或视图中可用。
+
+大多数按钮执行ChatGPT原生菜单功能，修改快捷键后仍可使用。“标记未读”会读取当前绑定；清除绑定或使用不支持的组合时会提示不可用。
+
+“更多ChatGPT功能”取决于当前App提供的菜单，并非完整快捷键目录。按需点击“刷新ChatGPT功能”即可，无需定期刷新。
+
+</details>
+
+<details>
+<summary><strong>更新后，辅助功能开关已开启，但操作仍提示未授权？</strong></summary>
+
+旧版临时签名可能导致系统保留了无法匹配新程序的授权。首次迁移到固定签名后需要重新允许一次；若开关仍无效，移除旧CodexTouchBar条目，再添加 `~/Applications/CodexTouchBar.app`。
+
+之后使用同一签名身份更新，应能保持授权。源码安装用户请保留本机签名资料。
+
+</details>
+
+<details>
+<summary><strong>为什么没有收到提醒，或恢复提醒稍有延迟？</strong></summary>
+
+提醒默认关闭，开启后还需允许系统通知；专注模式也可能隐藏横幅。首次开启不会补发已经存在的状态。
+
+恢复提醒需要后续查询确认。后台每5分钟刷新，通常需一至两次刷新间隔；查询失败不会被当成确认。默认目标为100%，如果确认时已降到99%，就不会触发这次恢复提醒，可按需求调低目标。
+
+</details>
+
+<details>
+<summary><strong>换了账户，或想重新开始记录，怎么办？</strong></summary>
+
+本工具不读取账户身份，不能可靠识别同套餐账户切换。换账户后，建议在曲线窗口选择“清空历史记录…”，确认后删除两条历史，并重新建立提醒基线。
+
+</details>
+
+<details>
+<summary><strong>会保存哪些数据，占多少空间？</strong></summary>
+
+只在本机保存额度记录和设置，不记录聊天内容、账户标识或登录凭据，也不自行录音或转写。额度通过本机桌面App的工具读取。
+
+5H记录保留48小时，周记录保留14天，超期自动清理。按当前数据结构估算，存满后的历史主体约1.6 MB，连同运行期间的写入日志通常为几MB；无需手动清理。
+
+</details>
+
+## 反馈与开发
+
+欢迎在 [Issues](https://github.com/NUMS-half/Codex-TouchBar/issues) 反馈问题。建议附上macOS版本、ChatGPT版本、安装版本和问题截图；请隐藏账户信息或其他私人内容。
+
+[更新记录](CHANGELOG.md) · [开发与诊断](docs/DEVELOPMENT.md) · [发布指南](RELEASING.md)
+
+这是个人维护的工具，与OpenAI没有官方隶属关系。

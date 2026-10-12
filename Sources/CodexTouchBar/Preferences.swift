@@ -4,6 +4,7 @@ final class Preferences {
     static let shared = Preferences()
     static let didChange = Notification.Name("CodexTouchBar.PrefsDidChange")
     static let buttonsDidChange = Notification.Name("CodexTouchBar.ButtonsDidChange")
+    static let alertsDidChange = Notification.Name("CodexTouchBar.AlertsDidChange")
 
     private let defaults: UserDefaults
     private let buttonsKey = "touchBarButtons.v1"
@@ -14,6 +15,24 @@ final class Preferences {
     static let refreshIntervals: [TimeInterval] = [30, 60, 120, 300, 600]
 
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+
+    var usageAlertOptions: UsageAlertOptions {
+        get {
+            guard let data = defaults.data(forKey: "usageAlerts.options.v1"),
+                  let options = try? JSONDecoder().decode(UsageAlertOptions.self, from: data) else { return .init() }
+            return options
+        }
+        set {
+            guard newValue != usageAlertOptions, let data = try? JSONEncoder().encode(newValue) else { return }
+            defaults.set(data, forKey: "usageAlerts.options.v1")
+            NotificationCenter.default.post(name: Self.alertsDidChange, object: self)
+        }
+    }
+
+    var usageAlertState: Data? {
+        get { defaults.data(forKey: "usageAlerts.state.v1") }
+        set { defaults.set(newValue, forKey: "usageAlerts.state.v1") }
+    }
 
     var touchBarConfiguration: TouchBarConfiguration {
         get { TouchBarConfiguration.decode(defaults.data(forKey: buttonsKey)) }

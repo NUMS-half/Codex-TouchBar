@@ -2,6 +2,7 @@ import Foundation
 
 enum SelfTest {
     static func run() -> Bool {
+        guard UsageMonitoringDiagnostics.run() else { return false }
         guard DesktopKeybindingChecks.run() else { return false }
         guard TouchBarConfigurationChecks.run() else { return false }
         guard CodexExecutableResolver().resolve() != nil else { return false }

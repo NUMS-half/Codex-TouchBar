@@ -10,7 +10,12 @@ enum ButtonSettingsDiagnostics {
     }
 
     static func run(previewPath: String?) -> Bool {
-        guard checkPanelAndMenuBar(previewPath: previewPath) else { return false }
+        if let previewPath {
+            do { try FileManager.default.createDirectory(at: URL(fileURLWithPath: previewPath).deletingLastPathComponent(), withIntermediateDirectories: true) }
+            catch { print("Settings preview directory failed: \(error)"); return false }
+        }
+        guard checkPanelAndMenuBar(previewPath: previewPath),
+              UnifiedSettingsDiagnostics.run(folder: previewPath.map { URL(fileURLWithPath: $0).deletingLastPathComponent() }) else { return false }
         let suite = "CodexTouchBar.ButtonsSelfTest.\(UUID().uuidString)"
         guard let defaults = UserDefaults(suiteName: suite) else { return false }
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -22,7 +27,7 @@ enum ButtonSettingsDiagnostics {
         defer { center.removeObserver(buttonsToken); center.removeObserver(generalToken) }
         let controller = TouchBarSettingsController(preferences: preferences, desktopActions: DesktopActions())
         controller.beginEditing()
-        guard let content = controller.window?.contentView else { return false }
+        guard let content = Optional(controller.view) else { return false }
         let views = descendants(content)
         let popups = views.compactMap { $0 as? NSPopUpButton }.sorted { $0.tag < $1.tag }
         let fields = views.compactMap { $0 as? NSTextField }.filter(\.isEditable).sorted { $0.tag < $1.tag }
@@ -154,35 +159,35 @@ enum ButtonSettingsDiagnostics {
         content.layoutSubtreeIfNeeded()
         let views = descendants(content)
         let buttons = views.compactMap { $0 as? NSButton }
-        guard size.width == 340, size.height < 390,
-              let customize = buttons.first(where: { $0.title == "快捷操作…" }),
-              let refresh = buttons.first(where: { $0.title == "刷新" }),
-              let toggle = buttons.first(where: { $0.title.hasPrefix("Touch Bar: ") }),
-              let login = buttons.first(where: { $0.title.hasPrefix("登录启动: ") }),
-              let refreshSettings = views.compactMap({ $0 as? NSTextField }).first(where: { $0.stringValue == "自动刷新" })?.superview,
-              let actions = customize.superview as? NSStackView,
-              actions.arrangedSubviews == [refresh, toggle, login, customize],
-              !buttons.contains(where: { $0.title == "退出" }),
-              abs(refreshSettings.frame.minY - actions.frame.maxY - 10) < 0.5 else {
+        guard size.width == 340, size.height < 380,
+              let settings = buttons.first(where: { $0.title == "设置…" }),
+              let history = buttons.first(where: { $0.title == "额度曲线…" }),
+              let quit = buttons.first(where: { $0.title == "退出" }),
+              let actions = settings.superview as? NSStackView,
+              actions.arrangedSubviews == [history, settings, quit],
+              !buttons.contains(where: { $0.title == "提醒设置…" || $0.title == "快捷操作…" || $0.title.hasPrefix("Touch Bar:") || $0.title.hasPrefix("登录启动:") }),
+              buttons.contains(where: { $0.accessibilityLabel() == "刷新额度" }) else {
             print("Panel layout regression: \(size)")
             return false
         }
         var actionFrames: [NSRect] = []
-        for button in [refresh, toggle, login, customize] {
+        for button in [history, settings, quit] {
             let frame = content.convert(button.alignmentRect(forFrame: button.frame), from: button.superview)
             actionFrames.append(frame)
-            guard content.bounds.contains(frame), frame.minX >= 15, frame.maxX <= size.width - 15 else {
-                print("Panel button outside inset: \(button.title), \(frame), bounds \(content.bounds)")
-                return false
-            }
+            guard content.bounds.contains(frame), frame.minX >= 15, frame.maxX <= size.width - 15 else { return false }
         }
         let gaps = zip(actionFrames, actionFrames.dropFirst()).map { $1.minX - $0.maxX }
         guard abs(actionFrames[0].minX - 16) < 0.5,
-              abs(actionFrames[3].maxX - (size.width - 16)) < 0.5,
-              (gaps.max() ?? 0) - (gaps.min() ?? 0) < 0.5 else {
+              abs(actionFrames[2].maxX - (size.width - 16)) < 0.5,
+              (gaps.max() ?? 0) - (gaps.min() ?? 0) < 0.5,
+              actionFrames.allSatisfy({ abs($0.width - actionFrames[0].width) <= 0.5 }) else {
             print("Panel spacing regression: \(actionFrames), gaps \(gaps)")
             return false
         }
+        var opened = 0
+        panel.onShowSettings = { opened += 1 }
+        settings.performClick(nil)
+        guard opened == 1 else { return false }
 
         let readout = StatusUsageReadoutView()
         readout.update(fiveHour: fiveHour, weekly: weekly)

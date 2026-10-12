@@ -1,5 +1,4 @@
 import AppKit
-import ServiceManagement
 
 private final class PlanTagView: NSView {
     private let label = NSTextField(labelWithString: "")
@@ -87,20 +86,17 @@ final class PanelController: NSObject, NSPopoverDelegate {
     private let errorDetailsPopover = NSPopover()
     private var errorBannerView: NSStackView?
     private var currentErrorMessage: String?
-    private let refreshIntervalLabel = NSTextField(labelWithString: "自动刷新")
-    private let refreshIntervalPopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let refreshIntervalHint = NSTextField(labelWithString: "Codex 前台；后台 5 分钟")
-    private let refreshButton = NSButton(title: "刷新", target: nil, action: nil)
-    private let touchBarButton = NSButton(title: "Touch Bar: 开", target: nil, action: nil)
-    private let loginButton = NSButton(title: "登录启动: 开", target: nil, action: nil)
-    private let customizeButton = NSButton(title: "快捷操作…", target: nil, action: nil)
+    private let refreshButton = QuotaRefreshButton(frame: .zero)
+    private let historyButton = NSButton(title: "额度曲线…", target: nil, action: nil)
+    private let settingsButton = NSButton(title: "设置…", target: nil, action: nil)
+    private let quitButton = NSButton(title: "退出", target: nil, action: nil)
     private let popover = NSPopover()
     private var outsideClickMonitor: Any?
 
     var onRefresh: (() -> Void)?
-    var onToggleTouchBar: (() -> Void)?
-    var onToggleLoginItem: (() -> Void)?
-    var onCustomizeButtons: (() -> Void)?
+    var onShowHistory: (() -> Void)?
+    var onShowSettings: (() -> Void)?
+    var onQuit: (() -> Void)?
 
     private let panelWidth: CGFloat = 340
 
@@ -152,29 +148,12 @@ final class PanelController: NSObject, NSPopoverDelegate {
         errorDetailsPopover.behavior = .transient
         errorDetailsPopover.animates = true
 
-        refreshIntervalLabel.font = .systemFont(ofSize: 12, weight: .medium)
-        refreshIntervalLabel.textColor = .secondaryLabelColor
-        refreshIntervalHint.font = .systemFont(ofSize: 10, weight: .regular)
-        refreshIntervalHint.textColor = .tertiaryLabelColor
-        refreshIntervalPopup.controlSize = .small
-        refreshIntervalPopup.target = self
-        refreshIntervalPopup.action = #selector(changeRefreshInterval)
-        Preferences.refreshIntervals.forEach { interval in
-            refreshIntervalPopup.addItem(withTitle: Preferences.refreshIntervalTitle(interval))
-            refreshIntervalPopup.lastItem?.tag = Int(interval)
-        }
-
-        refreshButton.target = self
-        refreshButton.action = #selector(refresh)
-        touchBarButton.target = self
-        touchBarButton.action = #selector(toggleTouchBar)
-        loginButton.target = self
-        loginButton.action = #selector(toggleLoginItem)
-        customizeButton.target = self
-        customizeButton.action = #selector(customizeButtons)
-        [refreshButton, touchBarButton, loginButton, customizeButton].forEach {
-            $0.bezelStyle = .rounded
-            $0.controlSize = .small
+        refreshButton.target = self; refreshButton.action = #selector(refresh)
+        historyButton.target = self; historyButton.action = #selector(showHistory)
+        settingsButton.target = self; settingsButton.action = #selector(showSettings)
+        quitButton.target = self; quitButton.action = #selector(quit)
+        for button in [historyButton, settingsButton, quitButton] {
+            button.bezelStyle = .rounded; button.controlSize = .small
         }
     }
 
@@ -192,6 +171,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         popover.contentViewController = controller
         popover.contentSize = size
         popover.show(relativeTo: positioningRect, of: view, preferredEdge: .minY)
+        refreshButton.setPresented(true)
         installOutsideClickMonitor()
     }
 
@@ -213,9 +193,10 @@ final class PanelController: NSObject, NSPopoverDelegate {
         titleAndStatus.spacing = 8
         titleAndStatus.translatesAutoresizingMaskIntoConstraints = false
 
-        let header = NSStackView(views: [titleAndStatus, spacer(), planTag])
+        let header = NSStackView(views: [titleAndStatus, spacer(), planTag, refreshButton])
         header.orientation = .horizontal
         header.alignment = .centerY
+        header.spacing = 6
         header.translatesAutoresizingMaskIntoConstraints = false
 
         let cards = NSStackView(views: [fiveHourCard, weeklyCard])
@@ -250,21 +231,17 @@ final class PanelController: NSObject, NSPopoverDelegate {
         details.spacing = 4
         details.translatesAutoresizingMaskIntoConstraints = false
 
-        refreshIntervalHint.isHidden = currentErrorMessage != nil
-        let refreshSettings = NSStackView(views: [refreshIntervalLabel, refreshIntervalPopup, spacer(), refreshIntervalHint, errorBanner])
-        refreshSettings.orientation = .horizontal
-        refreshSettings.alignment = .centerY
-        refreshSettings.spacing = 7
-        refreshSettings.translatesAutoresizingMaskIntoConstraints = false
-
-        let actions = NSStackView(views: [refreshButton, touchBarButton, loginButton, customizeButton])
+        let actions = NSStackView(views: [historyButton, settingsButton, quitButton])
         actions.orientation = .horizontal
         actions.alignment = .centerY
-        actions.distribution = .equalSpacing
-        actions.spacing = 6
+        actions.distribution = .fillEqually
+        actions.spacing = 8
         actions.translatesAutoresizingMaskIntoConstraints = false
 
-        [header, cards, details, refreshSettings, actions].forEach(backdrop.addSubview)
+        let footer = NSStackView(views: [errorBanner, actions])
+        footer.orientation = .vertical; footer.alignment = .leading; footer.spacing = 8
+        footer.translatesAutoresizingMaskIntoConstraints = false
+        [header, cards, details, footer].forEach(backdrop.addSubview)
         NSLayoutConstraint.activate([
             backdrop.widthAnchor.constraint(equalToConstant: panelWidth),
             header.topAnchor.constraint(equalTo: backdrop.topAnchor, constant: 16),
@@ -277,19 +254,21 @@ final class PanelController: NSObject, NSPopoverDelegate {
             details.leadingAnchor.constraint(equalTo: header.leadingAnchor),
             details.trailingAnchor.constraint(equalTo: header.trailingAnchor),
             resetRow.widthAnchor.constraint(equalTo: details.widthAnchor),
-            refreshSettings.topAnchor.constraint(equalTo: details.bottomAnchor, constant: 10),
-            refreshSettings.leadingAnchor.constraint(equalTo: header.leadingAnchor),
-            refreshSettings.trailingAnchor.constraint(equalTo: header.trailingAnchor),
-            actions.leadingAnchor.constraint(equalTo: header.leadingAnchor),
-            actions.trailingAnchor.constraint(equalTo: header.trailingAnchor),
-            actions.topAnchor.constraint(equalTo: refreshSettings.bottomAnchor, constant: 10),
-            actions.bottomAnchor.constraint(equalTo: backdrop.bottomAnchor, constant: -13),
+            refreshButton.widthAnchor.constraint(equalToConstant: 22),
+            refreshButton.heightAnchor.constraint(equalToConstant: 22),
+            footer.topAnchor.constraint(equalTo: details.bottomAnchor, constant: 14),
+            footer.leadingAnchor.constraint(equalTo: header.leadingAnchor),
+            footer.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+            actions.widthAnchor.constraint(equalTo: footer.widthAnchor),
+            errorBanner.widthAnchor.constraint(equalTo: footer.widthAnchor),
+            footer.bottomAnchor.constraint(equalTo: backdrop.bottomAnchor, constant: -13),
         ])
 
         return backdrop
     }
 
     func close() {
+        refreshButton.setPresented(false)
         removeOutsideClickMonitor()
         if errorDetailsPopover.isShown { errorDetailsPopover.performClose(nil) }
         popover.performClose(nil)
@@ -308,16 +287,11 @@ final class PanelController: NSObject, NSPopoverDelegate {
         currentErrorMessage = error
         errorLabel.stringValue = error.map(errorSummary) ?? ""
         errorBannerView?.isHidden = error == nil
-        refreshIntervalHint.isHidden = error != nil
         if errorDetailsPopover.isShown && error == nil {
             errorDetailsPopover.performClose(nil)
         }
         errorDetailsButton.isHidden = error == nil
-        refreshIntervalPopup.selectItem(withTag: Int(Preferences.shared.refreshInterval))
-        refreshButton.title = isRefreshing ? "刷新…" : "刷新"
-        refreshButton.isEnabled = !isRefreshing
-        touchBarButton.title = "Touch Bar: \(Preferences.shared.touchBarEnabled ? "开" : "关")"
-        loginButton.title = "登录启动: \(SMAppService.mainApp.status == .enabled ? "开" : "关")"
+        refreshButton.setRefreshing(isRefreshing)
         if popover.isShown, let controller = popover.contentViewController {
             let size = controller.view.fittingSize
             controller.preferredContentSize = size
@@ -450,17 +424,15 @@ final class PanelController: NSObject, NSPopoverDelegate {
         NSPasteboard.general.setString(currentErrorMessage, forType: .string)
     }
 
-    @objc private func refresh() { onRefresh?() }
-    @objc private func changeRefreshInterval() {
-        Preferences.shared.refreshInterval = TimeInterval(refreshIntervalPopup.selectedTag())
-    }
-    @objc private func toggleTouchBar() { onToggleTouchBar?() }
-    @objc private func toggleLoginItem() { onToggleLoginItem?() }
-    @objc private func customizeButtons() { onCustomizeButtons?() }
+    @objc private func refresh() { refreshButton.beginInteraction(); onRefresh?() }
+    @objc private func showHistory() { onShowHistory?() }
+    @objc private func showSettings() { onShowSettings?() }
+    @objc private func quit() { onQuit?() }
 
     func popoverShouldDetach(_ popover: NSPopover) -> Bool { false }
 
     func popoverDidClose(_ notification: Notification) {
+        refreshButton.setPresented(false)
         removeOutsideClickMonitor()
         if errorDetailsPopover.isShown { errorDetailsPopover.performClose(nil) }
     }

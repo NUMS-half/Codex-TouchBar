@@ -8,7 +8,7 @@ private final class ButtonSettingsContentView: NSView {
 }
 
 @MainActor
-final class TouchBarSettingsController: NSWindowController, NSWindowDelegate, NSTextFieldDelegate {
+final class TouchBarSettingsController: NSViewController, NSTextFieldDelegate {
     private let preferences: Preferences
     private let desktopActions: DesktopActions
     private var draft = TouchBarConfiguration.default.slots
@@ -27,30 +27,21 @@ final class TouchBarSettingsController: NSWindowController, NSWindowDelegate, NS
     init(preferences: Preferences, desktopActions: DesktopActions) {
         self.preferences = preferences
         self.desktopActions = desktopActions
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 480),
-                              styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-        window.title = "Touch Bar 按钮设置"
-        window.contentView = ButtonSettingsContentView(frame: NSRect(x: 0, y: 0, width: 620, height: 480))
-        window.isReleasedWhenClosed = false
-        super.init(window: window)
-        window.delegate = self
-        buildContent()
-        renderEditor()
-        window.center()
+        super.init(nibName: nil, bundle: nil)
+        _ = view
     }
 
     required init?(coder: NSCoder) { nil }
 
-    func show() {
-        guard let window else { return }
-        let opening = !window.isVisible && !window.isMiniaturized
-        if opening {
-            beginEditing()
-        }
-        NSApp.activate(ignoringOtherApps: true)
-        if window.isMiniaturized { window.deminiaturize(nil) }
-        window.makeKeyAndOrderFront(nil)
-        if opening { updateCatalog() }
+    override func loadView() {
+        view = ButtonSettingsContentView(frame: NSRect(x: 0, y: 0, width: 620, height: 480))
+        buildContent()
+        beginEditing()
+    }
+
+    func startSession(readCatalog: Bool = true) {
+        beginEditing()
+        if readCatalog { updateCatalog() }
     }
 
     func beginEditing() {
@@ -71,7 +62,7 @@ final class TouchBarSettingsController: NSWindowController, NSWindowDelegate, NS
     }
 
     private func buildContent() {
-        guard let content = window?.contentView else { return }
+        let content = view
         addLabel("四个按钮区等宽，预览与 Touch Bar 使用相同样式", frame: NSRect(x: 20, y: 450, width: 580, height: 20))
         let previewBackdrop = NSView(frame: NSRect(x: 152, y: 404, width: 316, height: 42))
         previewBackdrop.wantsLayer = true
@@ -134,7 +125,7 @@ final class TouchBarSettingsController: NSWindowController, NSWindowDelegate, NS
         label.frame = frame
         label.font = .systemFont(ofSize: 12)
         label.textColor = .secondaryLabelColor
-        window?.contentView?.addSubview(label)
+        view.addSubview(label)
     }
 
     private func addButton(_ button: NSButton, frame: NSRect, action: Selector) {
@@ -142,7 +133,7 @@ final class TouchBarSettingsController: NSWindowController, NSWindowDelegate, NS
         button.bezelStyle = .rounded
         button.target = self
         button.action = action
-        window?.contentView?.addSubview(button)
+        view.addSubview(button)
     }
 
     private func renderEditor() {
@@ -248,21 +239,28 @@ final class TouchBarSettingsController: NSWindowController, NSWindowDelegate, NS
     }
 
     @objc private func restoreDefaults() {
-        window?.makeFirstResponder(nil)
+        view.window?.makeFirstResponder(nil)
         draft = TouchBarConfiguration.default.slots
         renderEditor()
     }
 
-    @objc private func cancelEditing() { window?.close() }
+    @objc private func cancelEditing() {
+        view.window?.makeFirstResponder(nil)
+        draft = preferences.touchBarConfiguration.slots
+        renderEditor()
+        statusLabel.stringValue = "已取消未保存的修改。"
+    }
 
     @objc private func saveConfiguration() {
-        window?.makeFirstResponder(nil)
+        view.window?.makeFirstResponder(nil)
         // Read controls once more to include the final field-editor value.
         for index in draft.indices where draft[index].action != .navigationPair {
             draft[index].customLabel = names[index].stringValue
         }
         preferences.touchBarConfiguration = TouchBarConfiguration(slots: draft)
-        window?.close()
+        draft = preferences.touchBarConfiguration.slots
+        renderEditor()
+        statusLabel.stringValue = "已保存，Touch Bar 已应用新的快捷操作。"
     }
 
     @objc private func refreshCatalog() { updateCatalog() }
@@ -283,7 +281,7 @@ final class TouchBarSettingsController: NSWindowController, NSWindowDelegate, NS
         }
     }
 
-    func windowWillClose(_ notification: Notification) {
+    func endSession() {
         readGeneration += 1
         readTask?.cancel()
         readTask = nil

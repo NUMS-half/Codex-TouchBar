@@ -1,5 +1,30 @@
 import AppKit
 
+if CommandLine.arguments.contains("--notification-self-test") {
+    MainActor.assumeIsolated {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        Task { @MainActor in
+            do {
+                let sent = try await UsageNotificationService().sendTestNotification()
+                print(sent ? "Test notification submitted to macOS; banner visibility depends on system settings." : "Notification acceptance skipped: enable notification permission in the app first. No permission or preference changed.")
+                exit(sent ? 0 : 2)
+            } catch { print("Test notification failed: \(error.localizedDescription)"); exit(1) }
+        }
+        NSApplication.shared.run()
+    }
+}
+
+if CommandLine.arguments.contains("--monitoring-ui-self-test") {
+    MainActor.assumeIsolated {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        Task { @MainActor in
+            let folder = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("build/monitoring-previews")
+            exit(await UsageMonitoringUIDiagnostics.run(folder: folder) ? 0 : 1)
+        }
+        NSApplication.shared.run()
+    }
+}
+
 if CommandLine.arguments.contains("--settings-self-test") {
     let previewIndex = CommandLine.arguments.firstIndex(of: "--settings-preview")
     let path = previewIndex.flatMap { CommandLine.arguments.indices.contains($0 + 1) ? CommandLine.arguments[$0 + 1] : nil }

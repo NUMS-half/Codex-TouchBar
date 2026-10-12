@@ -53,8 +53,9 @@ done
 swift tools/make_icns.swift "$ICONSET_DIR" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 rm -rf "$ICONSET_DIR" "$ICON_SOURCE"
 
-# Ad-hoc sign so the app can be opened without Gatekeeper prompts.
-codesign --sign - --force --deep "$APP_BUNDLE" 2>/dev/null || true
+# Use the same certificate across builds so macOS permission grants continue
+# to identify this app. A signing failure must stop the build.
+./tools/sign-app.sh "$APP_BUNDLE"
 
 echo "==> done"
 echo "App: $APP_BUNDLE"
