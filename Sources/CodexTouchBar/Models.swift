@@ -25,7 +25,7 @@ struct UsageWindow: Codable, Sendable, Equatable {
     let durationMinutes: Int?
     let resetsAt: Date?
 
-    var remainingPercent: Int { max(0, min(100, 100 - usedPercent)) }
+    var remainingPercent: Int { 100 - max(0, min(100, usedPercent)) }
 }
 
 /// The complete, non-sensitive state needed to render all surfaces.

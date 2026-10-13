@@ -14,7 +14,8 @@ enum ButtonSettingsDiagnostics {
             do { try FileManager.default.createDirectory(at: URL(fileURLWithPath: previewPath).deletingLastPathComponent(), withIntermediateDirectories: true) }
             catch { print("Settings preview directory failed: \(error)"); return false }
         }
-        guard checkPanelAndMenuBar(previewPath: previewPath),
+        guard checkExpandedTouchBar(previewPath: previewPath),
+              checkPanelAndMenuBar(previewPath: previewPath),
               UnifiedSettingsDiagnostics.run(folder: previewPath.map { URL(fileURLWithPath: $0).deletingLastPathComponent() }) else { return false }
         let suite = "CodexTouchBar.ButtonsSelfTest.\(UUID().uuidString)"
         guard let defaults = UserDefaults(suiteName: suite) else { return false }
@@ -28,7 +29,7 @@ enum ButtonSettingsDiagnostics {
         let controller = TouchBarSettingsController(preferences: preferences, desktopActions: DesktopActions())
         controller.beginEditing()
         guard let content = Optional(controller.view) else { return false }
-        let views = descendants(content)
+        let views = UIDiagnosticSupport.descendants(content)
         let popups = views.compactMap { $0 as? NSPopUpButton }.sorted { $0.tag < $1.tag }
         let fields = views.compactMap { $0 as? NSTextField }.filter(\.isEditable).sorted { $0.tag < $1.tag }
         let previews = views.compactMap { $0 as? TouchBarActionSlotView }
@@ -131,17 +132,58 @@ enum ButtonSettingsDiagnostics {
         if let previewPath {
             preferences.touchBarConfiguration = .default
             controller.beginEditing()
-            content.layoutSubtreeIfNeeded()
-            guard let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { return false }
-            content.cacheDisplay(in: content.bounds, to: bitmap)
-            guard let png = bitmap.representation(using: .png, properties: [:]) else { return false }
-            do { try png.write(to: URL(fileURLWithPath: previewPath)) } catch { return false }
+            do { try UIDiagnosticSupport.render(content, to: URL(fileURLWithPath: previewPath)) }
+            catch { return false }
         }
         return true
     }
 
-    private static func descendants(_ view: NSView) -> [NSView] {
-        [view] + view.subviews.flatMap { descendants($0) }
+    private static func checkExpandedTouchBar(previewPath: String?) -> Bool {
+        let controller = TouchBarController()
+        let identifier = NSTouchBarItem.Identifier("com.wyx.CodexTouchBar.usage")
+        guard let item = controller.touchBar(NSTouchBar(), makeItemForIdentifier: identifier) as? NSCustomTouchBarItem else { return false }
+        let view = item.view
+        view.frame = NSRect(x: 0, y: 0, width: TouchBarLayout.width, height: TouchBarLayout.height)
+        view.appearance = NSAppearance(named: .darkAqua)
+        let now = Date()
+        controller.update(snapshot: .init(
+            fiveHour: .init(kind: .fiveHour, usedPercent: 43, durationMinutes: 300, resetsAt: now.addingTimeInterval(3600)),
+            weekly: .init(kind: .weekly, usedPercent: 7, durationMinutes: 10080, resetsAt: now.addingTimeInterval(86400)),
+            planType: "Plus", limitName: nil, creditBalance: nil, unlimitedCredits: false,
+            availableResetCredits: 0, fetchedAt: now), freshness: .live, isRefreshing: false)
+        let buttons = view.subviews.compactMap { $0 as? NSButton }
+        guard let card = buttons.first(where: { $0.title.isEmpty }),
+              let back = buttons.first(where: { $0.title == "‹" }),
+              let refresh = buttons.first(where: { $0.title == "↻" }) else { return false }
+        view.layoutSubtreeIfNeeded()
+        card.performClick(nil)
+        view.layoutSubtreeIfNeeded()
+        let visibleEdge = view.bounds.maxX - TouchBarLayout.navigationTrailingInset
+        guard !refresh.isHidden, !back.isHidden, refresh.frame.width == 36,
+              refresh.frame.maxX <= visibleEdge else {
+            print("Expanded Touch Bar regression: refresh ends at \(refresh.frame.maxX), visible edge \(visibleEdge)")
+            return false
+        }
+        let visible = view.subviews.filter { !$0.isHidden }.sorted { $0.frame.minX < $1.frame.minX }
+        guard visible.count == 4, visible.allSatisfy({ $0.frame.minX >= 0 && $0.frame.maxX <= visibleEdge }),
+              abs(visible[1].frame.width - visible[2].frame.width) < 0.001,
+              zip(visible, visible.dropFirst()).allSatisfy({ abs($1.frame.minX - $0.frame.maxX - TouchBarLayout.expandedGap) < 0.001 }) else { return false }
+        var refreshCalls = 0
+        controller.onRefresh = { refreshCalls += 1 }
+        refresh.performClick(nil)
+        guard refreshCalls == 1 else { return false }
+        if let previewPath {
+            do {
+                let folder = URL(fileURLWithPath: previewPath).deletingLastPathComponent()
+                try UIDiagnosticSupport.render(view, to: folder.appendingPathComponent("touchbar-expanded.png"))
+            } catch { print("Expanded Touch Bar preview failed: \(error)"); return false }
+        }
+        back.performClick(nil)
+        view.layoutSubtreeIfNeeded()
+        guard refresh.isHidden, back.isHidden,
+              view.subviews.compactMap({ $0 as? TouchBarActionSlotView }).allSatisfy({ !$0.isHidden && $0.frame.width == 68 }) else { return false }
+        print("Expanded Touch Bar self-test passed (visible bounds, equal cards, gaps, refresh, return)")
+        return true
     }
 
     private static func checkPanelAndMenuBar(previewPath: String?) -> Bool {
@@ -157,7 +199,7 @@ enum ButtonSettingsDiagnostics {
         window.contentView = content
         content.appearance = NSAppearance(named: .aqua)
         content.layoutSubtreeIfNeeded()
-        let views = descendants(content)
+        let views = UIDiagnosticSupport.descendants(content)
         let buttons = views.compactMap { $0 as? NSButton }
         guard size.width == 340, size.height < 380,
               let settings = buttons.first(where: { $0.title == "设置…" }),
@@ -214,7 +256,8 @@ enum ButtonSettingsDiagnostics {
 
         if let previewPath {
             let folder = URL(fileURLWithPath: previewPath).deletingLastPathComponent()
-            guard writePreview(content, to: folder.appendingPathComponent("panel-preview.png")) else { return false }
+            do { try UIDiagnosticSupport.render(content, to: folder.appendingPathComponent("panel-preview.png")) }
+            catch { return false }
             let sampleWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 210, height: 90), styleMask: .borderless, backing: .buffered, defer: false)
             let sample = NSView(frame: NSRect(x: 0, y: 0, width: 210, height: 90))
             sampleWindow.contentView = sample
@@ -234,16 +277,10 @@ enum ButtonSettingsDiagnostics {
                 ])
             }
             sample.layoutSubtreeIfNeeded()
-            guard writePreview(sample, to: folder.appendingPathComponent("menu-bar-appearance-preview.png")) else { return false }
+            do { try UIDiagnosticSupport.render(sample, to: folder.appendingPathComponent("menu-bar-appearance-preview.png")) }
+            catch { return false }
         }
         return true
     }
 
-    private static func writePreview(_ view: NSView, to url: URL) -> Bool {
-        guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return false }
-        view.cacheDisplay(in: view.bounds, to: bitmap)
-        guard let png = bitmap.representation(using: .png, properties: [:]) else { return false }
-        do { try png.write(to: url) } catch { return false }
-        return true
-    }
 }

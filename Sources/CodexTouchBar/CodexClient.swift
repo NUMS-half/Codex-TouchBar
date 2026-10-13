@@ -30,14 +30,25 @@ protocol AppServerRunning: Sendable {
 /// initialize response are deliberately ignored, and callers may append any
 /// sized chunk from the pipe.
 struct LineDelimitedUsageResponseParser {
+    // A quota response is small. Bound a malformed, never-terminated frame.
+    static let maximumBufferedBytes = 4 * 1_024 * 1_024
     private var buffer = Data()
 
     mutating func append(_ data: Data) -> Result<Data, Error>? {
-        buffer.append(data)
         let newline = Data([0x0A])
-        while let range = buffer.range(of: newline) {
-            let line = buffer.subdata(in: 0..<range.lowerBound)
-            buffer.removeSubrange(0..<range.upperBound)
+        var cursor = data.startIndex
+        while cursor < data.endIndex {
+            let delimiter = data.range(of: newline, in: cursor..<data.endIndex)
+            let end = delimiter?.lowerBound ?? data.endIndex
+            guard end - cursor <= Self.maximumBufferedBytes - buffer.count else {
+                buffer.removeAll(keepingCapacity: false)
+                return .failure(UsageServiceError.invalidResponse)
+            }
+            buffer.append(data[cursor..<end])
+            guard let delimiter else { return nil }
+            let line = buffer
+            buffer = Data()
+            cursor = delimiter.upperBound
             guard !line.isEmpty,
                   let envelope = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
                   (envelope["id"] as? NSNumber)?.intValue == 2 else { continue }
@@ -53,6 +64,7 @@ struct LineDelimitedUsageResponseParser {
         }
         return nil
     }
+
 }
 
 struct ProcessAppServerRunner: AppServerRunning {
@@ -174,7 +186,7 @@ private final class OneShotAppServerRequest: @unchecked Sendable {
                 "clientInfo": [
                     "name": "codex-touchbar",
                     "title": "Codex TouchBar",
-                    "version": "2.2.0",
+                    "version": "2.2.1",
                 ],
                 "capabilities": ["experimentalApi": true],
             ],

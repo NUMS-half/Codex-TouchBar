@@ -40,6 +40,15 @@ final class UsageSnapshotParserTests: XCTestCase {
         XCTAssertFalse(SnapshotFreshness.live.isStale)
     }
 
+    func testInvalidQuotaAndCountdownValuesCannotOverflow() {
+        XCTAssertEqual(UsageWindow(kind: .fiveHour, usedPercent: .min, durationMinutes: nil, resetsAt: nil).remainingPercent, 100)
+        XCTAssertEqual(UsageWindow(kind: .weekly, usedPercent: .max, durationMinutes: nil, resetsAt: nil).remainingPercent, 0)
+        let now = Date(timeIntervalSince1970: 0)
+        for interval in [Double.infinity, Double.nan, Double.greatestFiniteMagnitude] {
+            XCTAssertEqual(formatShortCountdown(Date(timeIntervalSince1970: interval), now: now), "N/A")
+        }
+    }
+
     func testNativeMenuActionTitles() {
         XCTAssertTrue(DesktopMenuAction.newChat.matches(menuTitle: "新聊天"))
         XCTAssertTrue(DesktopMenuAction.newChat.matches(topLevelTitle: "File"))
@@ -145,6 +154,10 @@ final class UsageSnapshotParserTests: XCTestCase {
             return XCTFail("Expected the usage response")
         }
         XCTAssertNotNil(object["rateLimits"])
+    }
+
+    func testAppServerResponseBoundsAndMultiLineChunks() {
+        XCTAssertTrue(AppServerResponseChecks.run())
     }
 
     func testLineDelimitedReaderSurfacesRPCError() {

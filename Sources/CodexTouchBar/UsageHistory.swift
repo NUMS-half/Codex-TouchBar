@@ -42,8 +42,7 @@ final class UsageHistoryDatabase: @unchecked Sendable {
     private(set) var notice: String?
     private let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
     static var defaultURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("com.wyx.CodexTouchBar/usage-history.sqlite")
+        ApplicationIdentity.supportDirectory.appendingPathComponent("usage-history.sqlite")
     }
     init(url: URL) { self.url = url }
     deinit { if let db { sqlite3_close(db) } }

@@ -5,14 +5,22 @@ private final class UsageWindowBackgroundView: NSView {
     override func draw(_ dirtyRect: NSRect) { NSColor.windowBackgroundColor.setFill(); bounds.fill() }
 }
 
+private final class UsageChartBackdropView: NSView {
+    override var isOpaque: Bool { true }
+    override func draw(_ dirtyRect: NSRect) { UsageChartPalette.canvas.setFill(); bounds.fill() }
+}
+
 @MainActor
 final class UsageHistoryWindowController: NSWindowController, NSWindowDelegate {
     private let monitor: UsageMonitoringController
     private let snapshot: () -> UsageSnapshot?
     private let isStale: () -> Bool
     private let chart = UsageChartView(frame: .zero)
-    private let selector = NSSegmentedControl(labels: ["5H · 最近48小时", "周 · 最近14天"], trackingMode: .selectOne, target: nil, action: nil)
-    private let summary = NSTextField(wrappingLabelWithString: "")
+    private let selector = NSSegmentedControl(labels: ["5H · 48小时", "周 · 14天"], trackingMode: .selectOne, target: nil, action: nil)
+    private let balanceCaption = NSTextField(labelWithString: "剩余额度")
+    private let balanceLabel = NSTextField(labelWithString: "—")
+    private let updatedLabel = NSTextField(labelWithString: "正在读取记录…")
+    private let firstLabel = NSTextField(labelWithString: "")
     private let status = NSTextField(wrappingLabelWithString: "")
     private let clearButton = NSButton(title: "清空历史记录…", target: nil, action: nil)
     private var kind = UsageWindowKind.fiveHour
@@ -22,35 +30,64 @@ final class UsageHistoryWindowController: NSWindowController, NSWindowDelegate {
 
     init(monitor: UsageMonitoringController, snapshot: @escaping () -> UsageSnapshot?, isStale: @escaping () -> Bool = { false }) {
         self.monitor = monitor; self.snapshot = snapshot; self.isStale = isStale
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 450),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 520),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "额度变化曲线"; window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 620, height: 400)
+        window.contentMinSize = NSSize(width: 620, height: 420)
         super.init(window: window)
         window.delegate = self
-        window.contentView = UsageWindowBackgroundView(frame: NSRect(x: 0, y: 0, width: 700, height: 450))
+        window.contentView = UsageChartBackdropView(frame: NSRect(x: 0, y: 0, width: 760, height: 520))
         guard let root = window.contentView else { return }
         selector.selectedSegment = 0; selector.target = self; selector.action = #selector(selectKind)
+        selector.font = .systemFont(ofSize: 12, weight: .medium)
+        selector.segmentStyle = .rounded
+        selector.setAccessibilityLabel("额度类型与历史范围")
         clearButton.target = self; clearButton.action = #selector(clearHistory)
-        summary.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
-        status.font = .systemFont(ofSize: 11); status.textColor = .secondaryLabelColor
-        let explanation = NSTextField(wrappingLabelWithString: "纵轴为剩余额度，下降表示消耗。实线连接连续记录，虚线连接空档、口径变化或回升，仅为估计；悬停显示最近实测值。")
-        explanation.font = .systemFont(ofSize: 11); explanation.textColor = .secondaryLabelColor
-        for view in [selector, summary, chart, explanation, status, clearButton] {
+        clearButton.bezelStyle = .rounded; clearButton.font = .systemFont(ofSize: 12)
+        clearButton.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
+        clearButton.imagePosition = .imageLeading; clearButton.contentTintColor = UsageChartPalette.muted
+        clearButton.toolTip = "清空5H和周额度历史，需要确认"
+        clearButton.setContentHuggingPriority(.required, for: .horizontal)
+        balanceCaption.font = .systemFont(ofSize: 12); balanceCaption.textColor = UsageChartPalette.muted
+        balanceLabel.font = .monospacedDigitSystemFont(ofSize: 26, weight: .semibold)
+        updatedLabel.font = .systemFont(ofSize: 11); updatedLabel.textColor = UsageChartPalette.muted
+        firstLabel.font = .systemFont(ofSize: 11); firstLabel.textColor = UsageChartPalette.muted
+        firstLabel.lineBreakMode = .byTruncatingTail
+        firstLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        status.font = .systemFont(ofSize: 11); status.textColor = UsageChartPalette.muted
+        status.maximumNumberOfLines = 2
+        status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let balance = NSStackView(views: [balanceCaption, balanceLabel])
+        balance.orientation = .horizontal; balance.alignment = .lastBaseline; balance.spacing = 10
+        let gap = NSView(); gap.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let header = NSStackView(views: [balance, gap, selector])
+        header.orientation = .horizontal; header.alignment = .centerY; header.spacing = 12
+        let dates = NSStackView(views: [updatedLabel, firstLabel])
+        dates.orientation = .horizontal; dates.alignment = .lastBaseline; dates.spacing = 24
+        let legend = UsageChartLegendView(frame: .zero)
+        let hint = NSTextField(labelWithString: "悬停查看实测值")
+        hint.font = .systemFont(ofSize: 11); hint.textColor = UsageChartPalette.muted
+        let legendGap = NSView(); legendGap.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let legendRow = NSStackView(views: [legend, legendGap, hint])
+        legendRow.orientation = .horizontal; legendRow.alignment = .centerY
+        let footerGap = NSView(); footerGap.setContentHuggingPriority(.init(rawValue: 1), for: .horizontal)
+        let footer = NSStackView(views: [status, footerGap, clearButton])
+        footer.orientation = .horizontal; footer.alignment = .centerY; footer.spacing = 16; footer.distribution = .fill
+        for view in [header, dates, chart, legendRow, footer] {
             view.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(view)
         }
         NSLayoutConstraint.activate([
-            selector.topAnchor.constraint(equalTo: root.topAnchor, constant: 18), selector.centerXAnchor.constraint(equalTo: root.centerXAnchor),
-            summary.topAnchor.constraint(equalTo: selector.bottomAnchor, constant: 16),
-            summary.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20), summary.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
-            chart.topAnchor.constraint(equalTo: summary.bottomAnchor, constant: 8), chart.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
-            chart.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12), chart.heightAnchor.constraint(greaterThanOrEqualToConstant: 190),
-            explanation.topAnchor.constraint(equalTo: chart.bottomAnchor, constant: 4), explanation.leadingAnchor.constraint(equalTo: summary.leadingAnchor),
-            explanation.trailingAnchor.constraint(equalTo: summary.trailingAnchor),
-            status.topAnchor.constraint(equalTo: explanation.bottomAnchor, constant: 7), status.leadingAnchor.constraint(equalTo: summary.leadingAnchor),
-            status.trailingAnchor.constraint(equalTo: clearButton.leadingAnchor, constant: -12),
-            clearButton.topAnchor.constraint(equalTo: explanation.bottomAnchor, constant: 7), clearButton.trailingAnchor.constraint(equalTo: summary.trailingAnchor),
-            clearButton.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16), status.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -16),
+            header.topAnchor.constraint(equalTo: root.topAnchor, constant: 20),
+            header.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 22), header.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -22),
+            dates.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 5),
+            dates.leadingAnchor.constraint(equalTo: header.leadingAnchor), dates.trailingAnchor.constraint(lessThanOrEqualTo: header.trailingAnchor),
+            chart.topAnchor.constraint(equalTo: dates.bottomAnchor, constant: 18), chart.leadingAnchor.constraint(equalTo: header.leadingAnchor),
+            chart.trailingAnchor.constraint(equalTo: header.trailingAnchor), chart.heightAnchor.constraint(greaterThanOrEqualToConstant: 220),
+            legendRow.topAnchor.constraint(equalTo: chart.bottomAnchor, constant: 12), legendRow.leadingAnchor.constraint(equalTo: header.leadingAnchor),
+            legendRow.trailingAnchor.constraint(equalTo: header.trailingAnchor), legend.heightAnchor.constraint(equalToConstant: 18),
+            footer.topAnchor.constraint(equalTo: legendRow.bottomAnchor, constant: 10), footer.leadingAnchor.constraint(equalTo: header.leadingAnchor),
+            footer.trailingAnchor.constraint(equalTo: header.trailingAnchor), footer.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
+            clearButton.widthAnchor.constraint(equalToConstant: 146), clearButton.heightAnchor.constraint(equalToConstant: 30),
         ])
         window.center()
     }
@@ -80,8 +117,11 @@ final class UsageHistoryWindowController: NSWindowController, NSWindowDelegate {
                 self.display(result, kind: selected, now: now)
             } catch {
                 guard let self, !Task.isCancelled, ticket == self.generation else { return }
-                self.chart.points = []
-                self.status.stringValue = "历史记录读取失败；当前额度显示不受影响。"
+                if self.chart.kind != selected {
+                    self.display(.init(points: [], notice: nil), kind: selected, now: now)
+                }
+                self.status.stringValue = "读取失败，稍后重新打开窗口重试；已有额度不受影响。"
+                self.status.textColor = .systemOrange
             }
         }
     }
@@ -92,14 +132,19 @@ final class UsageHistoryWindowController: NSWindowController, NSWindowDelegate {
         let windowValue = selected == .fiveHour ? value?.fiveHour : value?.weekly
         let latest = result.points.last
         let formatter = DateFormatter(); formatter.dateFormat = "MM/dd HH:mm:ss"
-        let balance = windowValue.map { "\($0.remainingPercent)%" } ?? "—"
-        let updated = latest.map { formatter.string(from: $0.time) } ?? "—"
-        let first = result.points.first.map { formatter.string(from: $0.time) } ?? "—"
-        summary.stringValue = "最近查询余额：\(balance)    最新成功记录：\(updated)\n范围内记录起点：\(first)"
-        chart.setAccessibilityValue("\(selected.accessibleTitle)，最近查询余额 \(balance)，\(result.points.count) 个历史采样")
+        let remaining = windowValue?.remainingPercent ?? latest?.remaining
+        let balance = remaining.map { "\($0)%" } ?? "—"
+        balanceCaption.stringValue = windowValue == nil && latest != nil ? "最近记录" : "剩余额度"
+        balanceLabel.stringValue = balance
+        balanceLabel.textColor = remaining.map(UsageChartPalette.quota) ?? UsageChartPalette.muted
+        updatedLabel.stringValue = "最近查询  " + (latest.map { formatter.string(from: $0.time) } ?? "—")
+        formatter.dateFormat = "MM/dd HH:mm"
+        firstLabel.stringValue = "记录始于  " + (result.points.first.map { formatter.string(from: $0.time) } ?? "—")
+        chart.setAccessibilityValue("\(selected.accessibleTitle)，余额 \(balance)，\(result.points.count) 个历史采样")
         let stale = isStale() || (latest.map { now.timeIntervalSince($0.time) > 900 } ?? false)
         status.stringValue = monitor.historyError ?? result.notice
-            ?? (stale ? "当前额度尚未更新或最近记录超过15分钟，曲线显示已有历史。" : "历史保存在本机；5H保留48小时，周额度保留14天。")
+            ?? (stale ? "最近查询尚未更新，当前显示已有记录。" : "记录仅保存在本机，超期自动清理。")
+        status.textColor = monitor.historyError != nil || result.notice != nil ? .systemOrange : UsageChartPalette.muted
     }
     @objc private func selectKind() { kind = selector.selectedSegment == 0 ? .fiveHour : .weekly; reload() }
     @objc private func clearHistory() {

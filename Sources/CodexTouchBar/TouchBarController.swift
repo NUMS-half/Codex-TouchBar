@@ -293,11 +293,14 @@ private final class TouchBarUsageView: NSView {
         let gap = TouchBarLayout.expandedGap
         if expanded {
             let edgeWidth: CGFloat = 36
-            let cardWidth = (width - 2 * edgeWidth - 3 * gap) / 2
+            // Use the same trailing reserve as the compact actions. The modal
+            // item's right edge extends behind the coexisting Control Strip.
+            let contentWidth = width - TouchBarLayout.navigationTrailingInset
+            let cardWidth = (contentWidth - 2 * edgeWidth - 3 * gap) / 2
             backButton.frame = NSRect(x: 0, y: 0, width: edgeWidth, height: height)
             fiveHour.frame = NSRect(x: edgeWidth + gap, y: 0, width: cardWidth, height: height)
             weekly.frame = NSRect(x: fiveHour.frame.maxX + gap, y: 0, width: cardWidth, height: height)
-            refreshButton.frame = NSRect(x: width - edgeWidth, y: 0, width: edgeWidth, height: height)
+            refreshButton.frame = NSRect(x: contentWidth - edgeWidth, y: 0, width: edgeWidth, height: height)
         } else {
             let half = width / 2
             let cardWidth = TouchBarLayout.compactQuotaWidth(for: width)

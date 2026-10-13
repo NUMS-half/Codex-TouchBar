@@ -2,6 +2,8 @@ import Foundation
 
 enum SelfTest {
     static func run() -> Bool {
+        guard AppServerResponseChecks.run() else { return false }
+        guard RefreshPolicyChecks.run() else { return false }
         guard UsageMonitoringDiagnostics.run() else { return false }
         guard DesktopKeybindingChecks.run() else { return false }
         guard TouchBarConfigurationChecks.run() else { return false }
@@ -70,6 +72,11 @@ enum SelfTest {
                   + TouchBarLayout.actionInset + TouchBarLayout.navigationTrailingInset
                   - contentWidth / 2) < 0.001,
               TouchBarLayout.actionInset == TouchBarLayout.elementGap,
+              UsageWindow(kind: .fiveHour, usedPercent: .min, durationMinutes: nil, resetsAt: nil).remainingPercent == 100,
+              UsageWindow(kind: .weekly, usedPercent: .max, durationMinutes: nil, resetsAt: nil).remainingPercent == 0,
+              formatShortCountdown(Date(timeIntervalSince1970: .infinity), now: date) == "N/A",
+              formatShortCountdown(Date(timeIntervalSince1970: .nan), now: date) == "N/A",
+              formatShortCountdown(Date(timeIntervalSince1970: .greatestFiniteMagnitude), now: date) == "N/A",
               DesktopMenuAction.newChat.matches(menuTitle: "新聊天"),
               DesktopMenuAction.newChat.matches(topLevelTitle: "文件"),
               DesktopMenuAction.toggleSidebar.matches(menuTitle: "显示/隐藏侧边栏"),

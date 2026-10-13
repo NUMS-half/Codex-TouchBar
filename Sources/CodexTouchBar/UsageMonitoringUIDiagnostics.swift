@@ -22,18 +22,6 @@ enum UsageMonitoringUIDiagnostics {
         func fetch(includeResetCreditDetails: Bool) async throws -> UsageSnapshot { try replies.removeFirst().get() }
     }
     final class Counts: @unchecked Sendable { var alerts = 0; var general = 0 }
-    static func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap { descendants($0) } }
-    static func render(_ view: NSView, to url: URL) throws {
-        view.layoutSubtreeIfNeeded()
-        guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
-            throw UsageMonitoringDiagnostics.CheckFailure(message: "bitmap unavailable")
-        }
-        view.cacheDisplay(in: view.bounds, to: bitmap)
-        guard let data = bitmap.representation(using: .png, properties: [:]) else {
-            throw UsageMonitoringDiagnostics.CheckFailure(message: "PNG unavailable")
-        }
-        try data.write(to: url)
-    }
     static func run(folder: URL) async -> Bool {
         let check = UsageMonitoringDiagnostics.check
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("usage-ui-tests-" + UUID().uuidString)
@@ -43,6 +31,7 @@ enum UsageMonitoringUIDiagnostics {
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try refreshScheduling()
             try await refreshFeedback()
             let preferences = Preferences(defaults: defaults)
             let service = FakeNotifications()
@@ -54,7 +43,7 @@ enum UsageMonitoringUIDiagnostics {
             let content = settings.view
             let settingsPreviewWindow = NSWindow(contentRect: content.bounds, styleMask: .borderless, backing: .buffered, defer: false)
             settingsPreviewWindow.contentView = content
-            let checks = descendants(content).compactMap { $0 as? NSButton }.filter { $0.title.hasSuffix("提醒") }
+            let checks = UIDiagnosticSupport.descendants(content).compactMap { $0 as? NSButton }.filter { $0.title.hasSuffix("提醒") }
             try check(checks.count == 4 && !preferences.usageAlertOptions.anyEnabled && service.authorizationRequests == 0, "four opt-in controls")
             checks[0].performClick(nil)
             for _ in 0..<10 { await Task.yield() }
@@ -65,8 +54,8 @@ enum UsageMonitoringUIDiagnostics {
             try check(Preferences(defaults: defaults).usageAlertOptions.fiveHourLow, "options survive restart")
             for appearance in [NSAppearance.Name.aqua, .darkAqua] {
                 settingsPreviewWindow.appearance = NSAppearance(named: appearance)
-                try render(content, to: folder.appendingPathComponent("alerts-\(appearance.rawValue).png"))
-                for control in descendants(content).filter({ $0 is NSControl && !$0.isHidden }) {
+                try UIDiagnosticSupport.render(content, to: folder.appendingPathComponent("alerts-\(appearance.rawValue).png"))
+                for control in UIDiagnosticSupport.descendants(content).filter({ $0 is NSControl && !$0.isHidden }) {
                     let rect = content.convert(control.alignmentRect(forFrame: control.frame), from: control.superview)
                     if !content.bounds.insetBy(dx: -1, dy: -1).contains(rect) {
                         print("Settings control outside layout: \(control), \(rect), bounds \(content.bounds)")
@@ -118,9 +107,10 @@ enum UsageMonitoringUIDiagnostics {
             for _ in 0..<10 { await Task.yield() }
             try check(service.sent.count == 1, "clear reestablishes baseline")
 
-            let historyWindow = UsageHistoryWindowController(monitor: monitor, snapshot: { low })
+            var chartSnapshot: UsageSnapshot? = low
+            let historyWindow = UsageHistoryWindowController(monitor: monitor, snapshot: { chartSnapshot })
             let chartContent = historyWindow.window!.contentView!
-            let chart = descendants(chartContent).compactMap { $0 as? UsageChartView }.first!
+            let chart = UIDiagnosticSupport.descendants(chartContent).compactMap { $0 as? UsageChartView }.first!
             chart.kind = .weekly; chart.end = now
             let fixtures = (0..<20_160).map { index -> UsageObservation in
                 var point = UsageMonitoringDiagnostics.point(100 - (index / 120) % 100, now.timeIntervalSince1970 - 14 * 86_400 + Double(index * 60 + 60), kind: .weekly)
@@ -131,7 +121,7 @@ enum UsageMonitoringUIDiagnostics {
                 historyWindow.window?.appearance = NSAppearance(named: appearance)
                 historyWindow.display(.init(points: fixtures, notice: nil), kind: .weekly, now: now)
                 let began = Date()
-                try render(chartContent, to: folder.appendingPathComponent("history-\(appearance.rawValue).png"))
+                try UIDiagnosticSupport.render(chartContent, to: folder.appendingPathComponent("history-\(appearance.rawValue).png"))
                 print("Chart render: 20160 raw samples, \(String(format: "%.3f", Date().timeIntervalSince(began)))s, \(appearance.rawValue)")
             }
             var interrupted: [UsageObservation] = []
@@ -144,20 +134,78 @@ enum UsageMonitoringUIDiagnostics {
                 interrupted.append(point)
             }
             interrupted.append(UsageMonitoringDiagnostics.point(16, now.timeIntervalSince1970))
+            chartSnapshot = snapshot(16, at: now)
             for appearance in [NSAppearance.Name.aqua, .darkAqua] {
                 historyWindow.window?.appearance = NSAppearance(named: appearance)
                 historyWindow.display(.init(points: interrupted, notice: nil), kind: .fiveHour, now: now)
-                try render(chartContent, to: folder.appendingPathComponent("history-dashed-\(appearance.rawValue).png"))
+                try UIDiagnosticSupport.render(chartContent, to: folder.appendingPathComponent("history-dashed-\(appearance.rawValue).png"))
             }
-            historyWindow.window!.setContentSize(NSSize(width: 620, height: 400))
+            var dense: [UsageObservation] = []
+            for minute in stride(from: 0, through: 1_440, by: 5) {
+                let remaining: Int
+                switch minute {
+                case ..<240: remaining = 26 - minute / 24
+                case ..<600: remaining = 100
+                case ..<780: remaining = 100 - (minute - 600) * 50 / 180
+                case ..<1_000: remaining = 100
+                case ..<1_200: remaining = 100 - (minute - 1_000) * 45 / 200
+                case ..<1_320: remaining = 100
+                case ..<1_410: remaining = 100 - (minute - 1_320) * 45 / 90
+                default: remaining = 100
+                }
+                var point = UsageMonitoringDiagnostics.point(remaining, now.timeIntervalSince1970 - 86_400 + Double(minute * 60))
+                point.rise = [240, 780, 1_200, 1_410].contains(minute)
+                dense.append(point)
+            }
+            chartSnapshot = snapshot(100, at: now)
+            for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+                historyWindow.window?.appearance = NSAppearance(named: appearance)
+                historyWindow.display(.init(points: dense, notice: nil), kind: .fiveHour, now: now)
+                chartContent.layoutSubtreeIfNeeded()
+                let plot = NSRect(x: 50, y: 37, width: chart.bounds.width - 70, height: chart.bounds.height - 89)
+                let labels = UsageChartAnnotations.layout(dense, start: now.addingTimeInterval(-48 * 3_600), duration: 48 * 3_600, plot: plot)
+                try check(labels.count < 4 && labels.flatMap(\.points).count == 4, "dense labels aggregate without losing events")
+                for label in labels {
+                    try check(label.rect.minX >= plot.minX && label.rect.maxX <= plot.maxX, "event labels stay inside edge")
+                }
+                for pair in zip(labels, labels.dropFirst()) { try check(!pair.0.rect.intersects(pair.1.rect), "event labels do not overlap") }
+                if let last = labels.last { chart.updateHover(at: NSPoint(x: last.rect.midX, y: last.rect.midY)) }
+                try UIDiagnosticSupport.render(chartContent, to: folder.appendingPathComponent("history-dense-\(appearance.rawValue).png"))
+                let clear = UIDiagnosticSupport.descendants(chartContent).compactMap { $0 as? NSButton }.first { $0.title == "清空历史记录…" }!
+                try check(clear.frame.width < 180, "clear action stays compact")
+                let clearBounds = chartContent.convert(clear.alignmentRect(forFrame: clear.frame), from: clear.superview)
+                try check(abs(clearBounds.maxX - (chartContent.bounds.maxX - 22)) < 1, "clear action aligns to trailing content edge")
+            }
+            historyWindow.window!.setContentSize(NSSize(width: 620, height: 420))
             historyWindow.display(.init(points: [], notice: nil), kind: .fiveHour, now: now)
-            try render(chartContent, to: folder.appendingPathComponent("history-empty.png"))
+            try UIDiagnosticSupport.render(chartContent, to: folder.appendingPathComponent("history-empty.png"))
+            chartSnapshot = snapshot(10, at: now)
             historyWindow.display(.init(points: [UsageMonitoringDiagnostics.point(10, now.timeIntervalSince1970)], notice: nil), kind: .fiveHour, now: now)
-            try render(chartContent, to: folder.appendingPathComponent("history-single.png"))
+            try UIDiagnosticSupport.render(chartContent, to: folder.appendingPathComponent("history-single.png"))
             try check(chart.frame.width > 400 && chart.frame.height >= 190, "resized chart fits")
             print("Usage monitoring UI self-test passed (fake permissions/notifications, refresh pipeline, persistence, rendering)")
             return true
         } catch { print("Usage monitoring UI self-test failed: \(error)"); return false }
+    }
+
+    private static func refreshScheduling() throws {
+        let check = UsageMonitoringDiagnostics.check
+        let timer = QuotaRefreshTimer()
+        timer.update(isForeground: false, interval: 300, onFire: {})
+        let backgroundDeadline = timer.nextFireDate
+        try check(backgroundDeadline != nil, "background timer scheduled")
+        for _ in 0..<100 { timer.update(isForeground: false, interval: 300, onFire: {}) }
+        try check(timer.nextFireDate == backgroundDeadline, "background app switching preserves refresh deadline")
+        timer.update(isForeground: true, interval: 30, onFire: {})
+        try check(timer.nextFireDate != nil && timer.nextFireDate! < backgroundDeadline!, "foreground transition reschedules")
+        timer.update(isForeground: false, interval: nil, onFire: {})
+        try check(timer.nextFireDate == nil, "disabled background timer is absent")
+        timer.update(isForeground: true, interval: 120, onFire: {})
+        let previous = timer.nextFireDate
+        timer.update(isForeground: true, interval: 600, onFire: {})
+        try check(timer.nextFireDate != nil && timer.nextFireDate! > previous!, "interval changes reschedule")
+        timer.stop()
+        try check(timer.nextFireDate == nil, "sleep or termination cancels timer")
     }
 
     private static func refreshFeedback() async throws {

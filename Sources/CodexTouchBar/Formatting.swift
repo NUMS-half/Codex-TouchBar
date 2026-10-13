@@ -22,7 +22,9 @@ func formatResetDate(_ date: Date?) -> String {
 
 func formatShortCountdown(_ date: Date?, now: Date = Date()) -> String {
     guard let date else { return "N/A" }
-    let remaining = max(0, Int(date.timeIntervalSince(now)))
+    let interval = date.timeIntervalSince(now)
+    guard interval.isFinite,
+          let remaining = Int(exactly: max(0, interval).rounded(.towardZero)) else { return "N/A" }
     let days = remaining / 86_400
     let hours = (remaining % 86_400) / 3_600
     let minutes = (remaining % 3_600) / 60

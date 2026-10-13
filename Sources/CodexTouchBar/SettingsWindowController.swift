@@ -67,53 +67,87 @@ final class GeneralSettingsController: NSViewController {
     private let touchBarToggle = NSButton(checkboxWithTitle: "显示 Touch Bar", target: nil, action: nil)
     private let login = NSButton(checkboxWithTitle: "登录时启动", target: nil, action: nil)
     private let refreshInterval = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let backgroundInterval = NSPopUpButton(frame: .zero, pullsDown: false)
+    private var refreshToggles: [QuotaRefreshTrigger: NSButton] = [:]
     private let loginStatus = NSTextField(wrappingLabelWithString: "")
     private let loginSettings = NSButton(title: "打开登录项设置…", target: nil, action: nil)
-    private var observer: NSObjectProtocol?
+    private var observers: [NSObjectProtocol] = []
 
     init(preferences: Preferences, loginItems: any LoginItemManaging) {
         self.preferences = preferences; self.loginItems = loginItems
         super.init(nibName: nil, bundle: nil)
         _ = view
-        observer = NotificationCenter.default.addObserver(forName: Preferences.didChange, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
+        for name in [Preferences.didChange, Preferences.refreshDidChange] {
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.refresh() }
+            })
         }
     }
     required init?(coder: NSCoder) { nil }
-    deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
+    deinit { observers.forEach { NotificationCenter.default.removeObserver($0) } }
     override func loadView() {
         view = SettingsBackgroundView(frame: NSRect(x: 0, y: 0, width: 620, height: 480))
         touchBarToggle.target = self; touchBarToggle.action = #selector(changeTouchBar)
         login.target = self; login.action = #selector(changeLogin)
         loginSettings.target = self; loginSettings.action = #selector(openLoginSettings)
         loginSettings.bezelStyle = .rounded; loginSettings.controlSize = .small
-        refreshInterval.target = self; refreshInterval.action = #selector(changeRefreshInterval)
-        refreshInterval.setAccessibilityLabel("前台自动刷新间隔")
-        for interval in Preferences.refreshIntervals {
-            refreshInterval.addItem(withTitle: Preferences.refreshIntervalTitle(interval))
-            refreshInterval.lastItem?.tag = Int(interval)
+        for (index, popup) in [refreshInterval, backgroundInterval].enumerated() {
+            popup.target = self; popup.action = #selector(changeRefreshInterval(_:)); popup.tag = index
+            popup.setAccessibilityLabel(index == 0 ? "前台自动刷新间隔" : "后台自动刷新间隔")
+            for interval in QuotaRefreshPolicy.intervals {
+                popup.addItem(withTitle: QuotaRefreshPolicy.intervalTitle(interval))
+                popup.lastItem?.tag = Int(interval)
+            }
+            popup.widthAnchor.constraint(equalToConstant: 112).isActive = true
         }
         loginStatus.font = .systemFont(ofSize: 11); loginStatus.textColor = .secondaryLabelColor
         let loginRows = NSStackView(views: [loginStatus, loginSettings])
         loginRows.orientation = .horizontal; loginRows.alignment = .centerY; loginRows.spacing = 12
-        let touchGroup = SettingsGroupView(title: "Touch Bar", subtitle: "ChatGPT位于前台时显示额度和快捷操作；关闭按钮会同步此开关。", controls: [touchBarToggle])
-        let loginGroup = SettingsGroupView(title: "登录启动", subtitle: "登录macOS后自动运行，继续在菜单栏查看额度。", controls: [login])
-        let refreshGroup = SettingsGroupView(title: "自动刷新", subtitle: "选择ChatGPT前台的刷新间隔。后台每5分钟刷新，睡眠时暂停。", controls: [refreshInterval])
-        let stack = NSStackView(views: [touchGroup, loginGroup, loginRows, refreshGroup])
-        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 14
+        let appSwitches = NSStackView(views: [touchBarToggle, login])
+        appSwitches.spacing = 28
+        let appRows = NSStackView(views: [appSwitches, loginRows])
+        appRows.orientation = .vertical; appRows.alignment = .leading; appRows.spacing = 8
+        let appGroup = SettingsGroupView(title: "应用", subtitle: "Touch Bar仅在ChatGPT前台显示；关闭按钮会同步显示开关。", controls: [appRows])
+
+        let events: [QuotaRefreshTrigger] = [.launch, .menuOpen, .foreground, .wake, .touchBar]
+        let rows = NSStackView()
+        rows.orientation = .vertical; rows.alignment = .leading; rows.spacing = 8
+        rows.widthAnchor.constraint(equalToConstant: 584).isActive = true
+        for trigger in events { rows.addArrangedSubview(makeRefreshToggle(trigger)) }
+        let divider = NSBox(); divider.boxType = .separator
+        rows.addArrangedSubview(divider)
+        divider.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
+        for (trigger, popup) in [(QuotaRefreshTrigger.foregroundTimer, refreshInterval), (.backgroundTimer, backgroundInterval)] {
+            let toggle = makeRefreshToggle(trigger)
+            let spacer = NSView()
+            let row = NSStackView(views: [toggle, spacer, popup])
+            row.orientation = .horizontal; row.alignment = .centerY; row.spacing = 12
+            rows.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
+        }
+        let refreshGroup = SettingsGroupView(title: "额度刷新", subtitle: "各项独立生效，睡眠时暂停。菜单栏刷新图标和右键“刷新”始终可用。", controls: [rows])
+        let note = NSTextField(wrappingLabelWithString: "曲线和提醒依据成功查询更新；关闭自动刷新后，仍会记录手动查询。")
+        note.font = .systemFont(ofSize: 11); note.textColor = .secondaryLabelColor
+        let stack = NSStackView(views: [appGroup, refreshGroup, note])
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.topAnchor.constraint(equalTo: view.topAnchor), stack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            touchGroup.widthAnchor.constraint(equalTo: stack.widthAnchor), loginGroup.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            loginRows.widthAnchor.constraint(equalTo: stack.widthAnchor), refreshGroup.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            appGroup.widthAnchor.constraint(equalTo: stack.widthAnchor), refreshGroup.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            note.widthAnchor.constraint(equalTo: stack.widthAnchor),
             stack.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor),
         ])
         refresh()
     }
     func refresh() {
         touchBarToggle.state = preferences.touchBarEnabled ? .on : .off
-        refreshInterval.selectItem(withTag: Int(preferences.refreshInterval))
+        let policy = preferences.refreshPolicy
+        for (trigger, toggle) in refreshToggles { toggle.state = policy.allows(trigger) ? .on : .off }
+        refreshInterval.selectItem(withTag: Int(policy.foregroundInterval))
+        backgroundInterval.selectItem(withTag: Int(policy.backgroundInterval))
+        refreshInterval.isEnabled = policy.allows(.foregroundTimer)
+        backgroundInterval.isEnabled = policy.allows(.backgroundTimer)
         switch loginItems.state {
         case .enabled: login.state = .on; loginStatus.stringValue = "已开启登录启动。"
         case .disabled: login.state = .off; loginStatus.stringValue = "登录启动已关闭。"
@@ -124,7 +158,25 @@ final class GeneralSettingsController: NSViewController {
         loginSettings.isHidden = loginItems.state != .requiresApproval
     }
     @objc private func changeTouchBar() { preferences.touchBarEnabled = touchBarToggle.state == .on }
-    @objc private func changeRefreshInterval() { preferences.refreshInterval = TimeInterval(refreshInterval.selectedTag()) }
+    private func makeRefreshToggle(_ trigger: QuotaRefreshTrigger) -> NSButton {
+        let toggle = NSButton(checkboxWithTitle: trigger.title, target: self, action: #selector(changeRefreshToggle(_:)))
+        toggle.setAccessibilityIdentifier("quotaRefresh.\(trigger.rawValue)")
+        refreshToggles[trigger] = toggle
+        return toggle
+    }
+    @objc private func changeRefreshToggle(_ sender: NSButton) {
+        guard let trigger = refreshToggles.first(where: { $0.value === sender })?.key else { return }
+        var policy = preferences.refreshPolicy
+        policy.setEnabled(sender.state == .on, for: trigger)
+        preferences.refreshPolicy = policy
+        refresh()
+    }
+    @objc private func changeRefreshInterval(_ sender: NSPopUpButton) {
+        var policy = preferences.refreshPolicy
+        if sender.tag == 0 { policy.foregroundInterval = TimeInterval(sender.selectedTag()) }
+        else { policy.backgroundInterval = TimeInterval(sender.selectedTag()) }
+        preferences.refreshPolicy = policy
+    }
     @objc private func changeLogin() {
         do { try loginItems.setEnabled(login.state == .on); refresh() }
         catch {
@@ -143,7 +195,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         var title: String { switch self { case .general: return "通用"; case .alerts: return "额度提醒"; case .shortcuts: return "快捷操作" } }
         var symbol: String { switch self { case .general: return "slider.horizontal.3"; case .alerts: return "bell"; case .shortcuts: return "keyboard" } }
         var subtitle: String { switch self {
-        case .general: return "管理Touch Bar显示、登录启动和刷新频率。修改立即生效。"
+        case .general: return "管理应用行为和各类额度刷新触发。修改立即生效。"
         case .alerts: return "分别管理5H和周额度的低额与恢复提醒。修改自动保存。"
         case .shortcuts: return "配置四个Touch Bar按钮。预览修改后，点击保存应用。"
         } }

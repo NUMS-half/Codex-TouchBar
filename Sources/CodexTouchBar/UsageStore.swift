@@ -131,9 +131,6 @@ struct UsageCache: Sendable {
     }
 
     private static func defaultURL() -> URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base
-            .appendingPathComponent("com.wyx.CodexTouchBar", isDirectory: true)
-            .appendingPathComponent("usage-snapshot.json")
+        ApplicationIdentity.supportDirectory.appendingPathComponent("usage-snapshot.json")
     }
 }

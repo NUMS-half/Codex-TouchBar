@@ -10,8 +10,11 @@ DerivedData/
 *.xcuserstate
 *.xcworkspace/xcuserdata/
 
-# Project Prompts
+# Local agent prompts and skill installation metadata
 AGENTS.md
+.agents/
+.claude/
+skills-lock.json
 
 # Temporary files
 *.swp

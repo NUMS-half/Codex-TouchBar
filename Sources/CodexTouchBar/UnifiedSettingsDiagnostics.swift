@@ -27,7 +27,7 @@ enum UnifiedSettingsDiagnostics {
             let window = controller.window!
             let content = window.contentView!
             try check(window.toolbar?.items.map(\.label) == ["通用", "额度提醒", "快捷操作"], "three unified settings pages")
-            func buttons() -> [NSButton] { UsageMonitoringUIDiagnostics.descendants(content).compactMap { $0 as? NSButton } }
+            func buttons() -> [NSButton] { UIDiagnosticSupport.descendants(content).compactMap { $0 as? NSButton } }
             let touch = buttons().first { $0.title == "显示 Touch Bar" }!
             let login = buttons().first { $0.title == "登录时启动" }!
             touch.performClick(nil)
@@ -41,13 +41,30 @@ enum UnifiedSettingsDiagnostics {
             login.performClick(nil)
             try check(login.state == .on && loginItems.state == .enabled, "login error rolls switch back")
             loginItems.fail = false
-            let interval = UsageMonitoringUIDiagnostics.descendants(content).compactMap { $0 as? NSPopUpButton }.first!
+            let interval = UIDiagnosticSupport.descendants(content).compactMap { $0 as? NSPopUpButton }.first { $0.accessibilityLabel() == "前台自动刷新间隔" }!
             interval.selectItem(withTag: 120)
             NSApp.sendAction(interval.action!, to: interval.target, from: interval)
-            try check(preferences.refreshInterval == 120, "refresh interval moved to general settings")
+            try check(preferences.refreshPolicy.foregroundInterval == 120, "refresh interval moved to general settings")
+
+            let background = UIDiagnosticSupport.descendants(content).compactMap { $0 as? NSPopUpButton }.first { $0.accessibilityLabel() == "后台自动刷新间隔" }!
+            background.selectItem(withTag: 600)
+            NSApp.sendAction(background.action!, to: background.target, from: background)
+            try check(preferences.refreshPolicy.backgroundInterval == 600, "background interval persists")
+            for trigger in QuotaRefreshTrigger.allCases where trigger != .manual {
+                let toggle = buttons().first { $0.title == trigger.title }!
+                try check(toggle.state == .on, "passive refresh defaults enabled")
+                toggle.performClick(nil)
+                try check(!preferences.refreshPolicy.allows(trigger), "each refresh switch applies independently")
+            }
+            try check(!interval.isEnabled && !background.isEnabled, "disabled timers disable their interval selectors")
+            try check(preferences.refreshPolicy.allows(.manual), "manual refresh remains available")
+            let restored = Preferences(defaults: defaults).refreshPolicy
+            try check(QuotaRefreshTrigger.allCases.filter { $0 != .manual }.allSatisfy { !restored.allows($0) }, "all disabled triggers survive restart")
+            buttons().first { $0.title == QuotaRefreshTrigger.foregroundTimer.title }!.performClick(nil)
+            try check(interval.isEnabled && !background.isEnabled && interval.selectedTag() == 120, "re-enabling one timer preserves interval and other timer state")
 
             controller.select(.shortcuts, readCatalog: false)
-            func fields() -> [NSTextField] { UsageMonitoringUIDiagnostics.descendants(content).compactMap { $0 as? NSTextField }.filter(\.isEditable).sorted { $0.tag < $1.tag } }
+            func fields() -> [NSTextField] { UIDiagnosticSupport.descendants(content).compactMap { $0 as? NSTextField }.filter(\.isEditable).sorted { $0.tag < $1.tag } }
             func rename(_ value: String) {
                 let field = fields()[0]; field.stringValue = value
                 (field.delegate as? TouchBarSettingsController)?.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: field))
@@ -68,7 +85,7 @@ enum UnifiedSettingsDiagnostics {
             controller.select(.alerts)
             buttons().first { $0.title == "5H低额提醒" }!.performClick(nil)
             try check(preferences.usageAlertOptions.fiveHourLow, "alert switch saves in unified window")
-            let inputs = UsageMonitoringUIDiagnostics.descendants(content).compactMap { $0 as? NSTextField }.filter(\.isEditable).sorted { $0.tag < $1.tag }
+            let inputs = UIDiagnosticSupport.descendants(content).compactMap { $0 as? NSTextField }.filter(\.isEditable).sorted { $0.tag < $1.tag }
             try check(inputs.count == 4 && inputs.map(\.integerValue) == [20, 20, 100, 100], "four configurable default thresholds")
             inputs[0].stringValue = "35"
             inputs[0].delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: inputs[0]))
@@ -77,7 +94,7 @@ enum UnifiedSettingsDiagnostics {
             inputs[0].delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: inputs[0]))
             inputs[0].delegate?.controlTextDidEndEditing?(Notification(name: NSControl.textDidEndEditingNotification, object: inputs[0]))
             try check(preferences.usageAlertOptions.fiveHourLowThreshold == 35 && inputs[0].integerValue == 35, "invalid input preserves previous threshold")
-            let stepper = UsageMonitoringUIDiagnostics.descendants(content).compactMap { $0 as? NSStepper }.first { $0.tag == 0 }!
+            let stepper = UIDiagnosticSupport.descendants(content).compactMap { $0 as? NSStepper }.first { $0.tag == 0 }!
             stepper.integerValue = 36
             NSApp.sendAction(stepper.action!, to: stepper.target, from: stepper)
             try check(preferences.usageAlertOptions.fiveHourLowThreshold == 36, "threshold stepper saves")
@@ -90,11 +107,11 @@ enum UnifiedSettingsDiagnostics {
                     for appearance in [NSAppearance.Name.aqua, .darkAqua] {
                         window.appearance = NSAppearance(named: appearance)
                         content.layoutSubtreeIfNeeded()
-                        for control in UsageMonitoringUIDiagnostics.descendants(content).filter({ $0 is NSControl && !$0.isHidden }) {
+                        for control in UIDiagnosticSupport.descendants(content).filter({ $0 is NSControl && !$0.isHidden }) {
                             let rect = content.convert(control.bounds, from: control)
                             try check(content.bounds.insetBy(dx: -6, dy: -6).contains(rect), "unified settings controls fit")
                         }
-                        try UsageMonitoringUIDiagnostics.render(content.superview ?? content, to: folder.appendingPathComponent("settings-\(page.rawValue)-\(appearance.rawValue).png"))
+                        try UIDiagnosticSupport.render(content.superview ?? content, to: folder.appendingPathComponent("settings-\(page.rawValue)-\(appearance.rawValue).png"))
                     }
                 }
             }

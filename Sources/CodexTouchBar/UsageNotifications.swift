@@ -113,7 +113,11 @@ final class UsageMonitoringController {
         self.preferences = preferences
         self.sender = sender
         let saved = preferences.usageAlertState.flatMap { try? JSONDecoder().decode(UsageAlertEngine.self, from: $0) }
-        engine = saved?.version == UsageAlertEngine.currentVersion ? saved! : UsageAlertEngine()
+        if let saved, saved.version == UsageAlertEngine.currentVersion {
+            engine = saved
+        } else {
+            engine = UsageAlertEngine()
+        }
         engine.configure(preferences.usageAlertOptions)
     }
 

@@ -82,7 +82,6 @@ final class DesktopActions {
         }
     }
 
-    static let desktopBundleID = "com.openai.codex"
 
     func readCatalog() async -> DesktopMenuCatalog {
         var catalog = await Task.detached(priority: .utility) { NativeMenuAccess.readCatalog() }.value
@@ -141,12 +140,12 @@ final class DesktopActions {
 
     private func isFrontmost(_ pid: pid_t) -> Bool {
         let app = NSWorkspace.shared.frontmostApplication
-        return app?.bundleIdentifier == Self.desktopBundleID && app?.processIdentifier == pid
+        return app?.bundleIdentifier == ApplicationIdentity.chatGPTBundleIdentifier && app?.processIdentifier == pid
     }
 
     private func trustedFrontmostPID() throws -> pid_t {
         guard let frontmost = NSWorkspace.shared.frontmostApplication,
-              frontmost.bundleIdentifier == Self.desktopBundleID else { throw ActionError.appNotFrontmost }
+              frontmost.bundleIdentifier == ApplicationIdentity.chatGPTBundleIdentifier else { throw ActionError.appNotFrontmost }
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         guard AXIsProcessTrustedWithOptions(options) else { throw ActionError.accessibilityRequired }
         return frontmost.processIdentifier
@@ -164,7 +163,7 @@ private final class NativeMenuAccess {
     }
 
     static func readCatalog() -> DesktopMenuCatalog {
-        guard let running = NSRunningApplication.runningApplications(withBundleIdentifier: "com.openai.codex")
+        guard let running = NSRunningApplication.runningApplications(withBundleIdentifier: ApplicationIdentity.chatGPTBundleIdentifier)
             .first(where: { !$0.isTerminated }) else {
             return DesktopMenuCatalog(message: "请打开 ChatGPT 后点击“刷新 ChatGPT 功能”；常用功能仍可设置。")
         }

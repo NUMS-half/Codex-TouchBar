@@ -13,7 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var settingsWindow = SettingsWindowController(service: usageNotifications, desktopActions: desktopActions)
     private var statusItem: NSStatusItem!
     private let statusReadout = StatusUsageReadoutView()
-    private var timer: Timer?
+    private let refreshTimer = QuotaRefreshTimer()
+    private var isSleeping = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         configureStatusItem()
@@ -29,26 +30,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.onChange = { [weak self] in self?.pushState() }
         pushState()
         restartTimer()
-        store.refresh()
+        requestRefresh(.launch)
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        timer?.invalidate()
+        refreshTimer.stop()
         Task { await usageMonitoring.waitForPendingWrites(); sender.reply(toApplicationShouldTerminate: true) }
         return .terminateLater
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        timer?.invalidate()
+        refreshTimer.stop()
         touchBar.setVisible(false)
     }
 
     private func configureCallbacks() {
-        panel.onRefresh = { [weak self] in self?.store.refresh(includeResetCreditDetails: true) }
+        panel.onRefresh = { [weak self] in self?.requestRefresh(.manual, includeResetCreditDetails: true) }
         panel.onShowHistory = { [weak self] in self?.showHistory() }
         panel.onShowSettings = { [weak self] in self?.showSettings() }
         panel.onQuit = { [weak self] in self?.quit() }
-        touchBar.onRefresh = { [weak self] in self?.store.refresh() }
+        touchBar.onRefresh = { [weak self] in
+            guard let self else { return }
+            if !self.requestRefresh(.touchBar) { self.touchBar.showFeedback("Touch Bar刷新已关闭，可在通用设置中开启") }
+        }
         touchBar.onClose = { Preferences.shared.touchBarEnabled = false }
         touchBar.onAction = { [weak self] command in
             self?.performDesktopAction { try self?.desktopActions.perform(command) }
@@ -59,6 +63,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: Preferences.didChange,
             object: nil
         )
+        NotificationCenter.default.addObserver(self, selector: #selector(refreshPreferencesChanged),
+                                               name: Preferences.refreshDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(buttonsChanged),
                                                name: Preferences.buttonsDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(alertsChanged),
@@ -109,8 +115,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         try? SMAppService.mainApp.register()
     }
 
+    @objc private func refreshPreferencesChanged() { restartTimer() }
+
     @objc private func preferencesChanged() {
-        restartTimer()
         updateTouchBarVisibility()
         pushState()
     }
@@ -137,37 +144,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func frontmostApplicationChanged(_ notification: Notification) {
         updateTouchBarVisibility()
-        restartTimer()
-        if isCodexFrontmost { store.refresh() }
+        restartTimer(forceRestart: false)
+        if isCodexFrontmost { requestRefresh(.foreground) }
     }
 
     @objc private func systemWillSleep(_ notification: Notification) {
-        timer?.invalidate()
+        isSleeping = true
+        refreshTimer.stop()
         touchBar.setVisible(false)
     }
 
     @objc private func systemDidWake(_ notification: Notification) {
+        isSleeping = false
         updateTouchBarVisibility()
         restartTimer()
-        store.refresh()
+        requestRefresh(.wake)
     }
 
     private var isCodexFrontmost: Bool {
-        NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.openai.codex"
+        NSWorkspace.shared.frontmostApplication?.bundleIdentifier == ApplicationIdentity.chatGPTBundleIdentifier
     }
 
     private func updateTouchBarVisibility() {
         let visible = Preferences.shared.touchBarEnabled
-            && isCodexFrontmost
+            && !isSleeping && isCodexFrontmost
         touchBar.setVisible(visible)
     }
 
-    private func restartTimer() {
-        timer?.invalidate()
-        let selectedInterval = Preferences.shared.refreshInterval
-        let interval = isCodexFrontmost ? selectedInterval : 300
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.store.refresh() }
+    @discardableResult
+    private func requestRefresh(_ trigger: QuotaRefreshTrigger, includeResetCreditDetails: Bool = false) -> Bool {
+        guard !isSleeping else { return false }
+        return Preferences.shared.refreshPolicy.perform(trigger) {
+            store.refresh(includeResetCreditDetails: includeResetCreditDetails)
+        }
+    }
+
+    private func restartTimer(forceRestart: Bool = true) {
+        guard !isSleeping else { refreshTimer.stop(); return }
+        let foreground = isCodexFrontmost
+        refreshTimer.update(isForeground: foreground,
+                            interval: Preferences.shared.refreshPolicy.timerInterval(isForeground: foreground),
+                            forceRestart: forceRestart) { [weak self] in
+            guard let self else { return }
+            self.requestRefresh(self.isCodexFrontmost ? .foregroundTimer : .backgroundTimer)
         }
     }
 
@@ -180,7 +199,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             contextMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY + 4), in: button)
             return
         }
-        store.refresh(includeResetCreditDetails: true)
+        if !panel.isShown { requestRefresh(.menuOpen, includeResetCreditDetails: true) }
         panel.show(relativeTo: button.bounds, of: button)
     }
 
@@ -200,7 +219,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return item
     }
 
-    @objc private func refreshNow() { store.refresh() }
+    @objc private func refreshNow() { requestRefresh(.manual) }
 
     @objc private func quit() { NSApp.terminate(nil) }
 
