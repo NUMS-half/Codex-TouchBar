@@ -34,8 +34,9 @@ private final class QuotaProgressView: NSView {
 final class QuotaCardView: NSView {
     private let titleLabel = NSTextField(labelWithString: "")
     private let remainingLabel = NSTextField(labelWithString: "—")
-    private let usedLabel = NSTextField(labelWithString: "")
+    private let remainingCaption = NSTextField(labelWithString: "剩余")
     private let resetLabel = NSTextField(labelWithString: "")
+    private let changeLabel = NSTextField(labelWithString: "记录不足，暂不显示近期变化")
     private let progress = QuotaProgressView()
     private let kind: UsageWindowKind
 
@@ -46,7 +47,8 @@ final class QuotaCardView: NSView {
         wantsLayer = true
         layer?.cornerRadius = 12
         layer?.cornerCurve = .continuous
-        layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.055).cgColor
+        layer?.borderWidth = 1
+        updateSurface()
         setup()
         update(nil)
     }
@@ -63,9 +65,13 @@ final class QuotaCardView: NSView {
         remainingLabel.font = .monospacedDigitSystemFont(ofSize: 25, weight: .bold)
         remainingLabel.textColor = .labelColor
 
-        usedLabel.translatesAutoresizingMaskIntoConstraints = false
-        usedLabel.font = .systemFont(ofSize: 11, weight: .regular)
-        usedLabel.textColor = .secondaryLabelColor
+        remainingCaption.translatesAutoresizingMaskIntoConstraints = false
+        remainingCaption.font = .systemFont(ofSize: 11, weight: .regular)
+        remainingCaption.textColor = .secondaryLabelColor
+        changeLabel.translatesAutoresizingMaskIntoConstraints = false
+        changeLabel.font = .systemFont(ofSize: 11)
+        changeLabel.textColor = .secondaryLabelColor
+        changeLabel.lineBreakMode = .byTruncatingTail
 
         resetLabel.translatesAutoresizingMaskIntoConstraints = false
         resetLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
@@ -73,34 +79,45 @@ final class QuotaCardView: NSView {
         resetLabel.alignment = .right
 
         progress.translatesAutoresizingMaskIntoConstraints = false
-        [titleLabel, remainingLabel, usedLabel, resetLabel, progress].forEach(addSubview)
+        [titleLabel, remainingLabel, remainingCaption, resetLabel, progress, changeLabel].forEach(addSubview)
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 96),
+            heightAnchor.constraint(equalToConstant: 116),
             titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 12),
             titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             remainingLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 2),
             remainingLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-            usedLabel.firstBaselineAnchor.constraint(equalTo: remainingLabel.firstBaselineAnchor),
-            usedLabel.leadingAnchor.constraint(equalTo: remainingLabel.trailingAnchor, constant: 7),
+            remainingCaption.firstBaselineAnchor.constraint(equalTo: remainingLabel.firstBaselineAnchor),
+            remainingCaption.leadingAnchor.constraint(equalTo: remainingLabel.trailingAnchor, constant: 7),
             resetLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             resetLabel.firstBaselineAnchor.constraint(equalTo: titleLabel.firstBaselineAnchor),
             progress.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             progress.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            progress.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -14),
-            progress.heightAnchor.constraint(equalToConstant: 8),
+            progress.bottomAnchor.constraint(equalTo: changeLabel.topAnchor, constant: -8),
+            progress.heightAnchor.constraint(equalToConstant: 6),
+            changeLabel.leadingAnchor.constraint(equalTo: progress.leadingAnchor),
+            changeLabel.trailingAnchor.constraint(equalTo: progress.trailingAnchor),
+            changeLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
         ])
     }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.055).cgColor
+        updateSurface()
     }
 
-    func update(_ window: UsageWindow?) {
+    private func updateSurface() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = MenuPanelPalette.inset.cgColor
+            layer?.borderColor = MenuPanelPalette.border.cgColor
+        }
+    }
+
+    func update(_ window: UsageWindow?, change: UsageRecentChange? = nil, isStale: Bool = false, now: Date = Date()) {
         guard let window else {
             remainingLabel.stringValue = "N/A"
             remainingLabel.textColor = .tertiaryLabelColor
-            usedLabel.stringValue = "当前方案未提供"
+            remainingCaption.stringValue = "当前方案未提供"
+            changeLabel.stringValue = "暂无额度记录"
             resetLabel.stringValue = ""
             progress.update(value: 0, tint: .tertiaryLabelColor)
             return
@@ -108,8 +125,12 @@ final class QuotaCardView: NSView {
         let remaining = window.remainingPercent
         remainingLabel.stringValue = "\(remaining)%"
         remainingLabel.textColor = statusColor(remainingPercent: remaining)
-        usedLabel.stringValue = "已用 \(window.usedPercent)%"
-        resetLabel.stringValue = "重置 \(formatResetDate(window.resetsAt))"
+        remainingCaption.stringValue = isStale ? "剩余 · 旧数据" : "剩余"
+        resetLabel.stringValue = formatResetCountdown(window.resetsAt, now: now)
+        resetLabel.toolTip = "重置时间：\(formatResetDate(window.resetsAt))"
+        changeLabel.stringValue = isStale ? "旧数据，暂不显示近期变化" : change?.text ?? "记录不足，暂不显示近期变化"
+        changeLabel.toolTip = changeLabel.stringValue
         progress.update(value: remaining, tint: statusColor(remainingPercent: remaining))
     }
+
 }

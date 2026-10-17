@@ -201,9 +201,9 @@ enum ButtonSettingsDiagnostics {
         content.layoutSubtreeIfNeeded()
         let views = UIDiagnosticSupport.descendants(content)
         let buttons = views.compactMap { $0 as? NSButton }
-        guard size.width == 340, size.height < 380,
+        guard size.width == 340, size.height < 450,
               let settings = buttons.first(where: { $0.title == "设置…" }),
-              let history = buttons.first(where: { $0.title == "额度曲线…" }),
+              let history = buttons.first(where: { $0.title == "额度图表…" }),
               let quit = buttons.first(where: { $0.title == "退出" }),
               let actions = settings.superview as? NSStackView,
               actions.arrangedSubviews == [history, settings, quit],
@@ -222,7 +222,8 @@ enum ButtonSettingsDiagnostics {
         guard abs(actionFrames[0].minX - 16) < 0.5,
               abs(actionFrames[2].maxX - (size.width - 16)) < 0.5,
               (gaps.max() ?? 0) - (gaps.min() ?? 0) < 0.5,
-              actionFrames.allSatisfy({ abs($0.width - actionFrames[0].width) <= 0.5 }) else {
+              // Equal thirds can differ by one point after AppKit pixel alignment.
+              actionFrames.allSatisfy({ abs($0.width - actionFrames[0].width) <= 1 }) else {
             print("Panel spacing regression: \(actionFrames), gaps \(gaps)")
             return false
         }

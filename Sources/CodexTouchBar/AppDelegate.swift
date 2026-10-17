@@ -7,9 +7,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let touchBar = TouchBarController()
     private let desktopActions = DesktopActions()
     private let panel = PanelController()
+    private let appMenu = AppMenuController()
     private let usageNotifications = UsageNotificationService()
     private lazy var usageMonitoring = UsageMonitoringController(sender: usageNotifications)
-    private var historyWindow: UsageHistoryWindowController?
     private lazy var settingsWindow = SettingsWindowController(service: usageNotifications, desktopActions: desktopActions)
     private var statusItem: NSStatusItem!
     private let statusReadout = StatusUsageReadoutView()
@@ -20,9 +20,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureStatusItem()
         configureCallbacks()
         store.onSuccessfulRefresh = { [weak self] in self?.usageMonitoring.consume($0) }
-        usageMonitoring.onChange = { [weak self] in self?.historyWindow?.reload() }
+        usageMonitoring.onChange = { [weak self] in self?.panel.reloadHistory(); self?.pushState() }
         usageNotifications.onOpenHistory = { [weak self] kind in
             self?.openHistory(kind: kind)
+        }
+        usageNotifications.onOpenQuota = { [weak self] in
+            guard let self, let button = self.statusItem.button else { return }
+            self.requestRefresh(.menuOpen, includeResetCreditDetails: true)
+            if !self.panel.isShown { self.panel.show(relativeTo: button.bounds, of: button) }
+            self.panel.showOverview()
         }
         usageMonitoring.start()
         observeWorkspace()
@@ -45,10 +51,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureCallbacks() {
+        panel.configureHistory(monitor: usageMonitoring, snapshot: { [weak self] in self?.store.snapshot },
+                               isStale: { [weak self] in self?.store.freshness.isStale ?? true })
         panel.onRefresh = { [weak self] in self?.requestRefresh(.manual, includeResetCreditDetails: true) }
         panel.onShowHistory = { [weak self] in self?.showHistory() }
         panel.onShowSettings = { [weak self] in self?.showSettings() }
         panel.onQuit = { [weak self] in self?.quit() }
+        appMenu.onRefresh = { [weak self] in self?.requestRefresh(.manual, includeResetCreditDetails: true) }
+        appMenu.onHistory = { [weak self] in self?.showHistory() }
+        appMenu.onSettings = { [weak self] in self?.showSettings() }
+        appMenu.onQuit = { [weak self] in self?.quit() }
+        panel.onDisplayTick = { [weak self] in self?.pushState() }
         touchBar.onRefresh = { [weak self] in
             guard let self else { return }
             if !self.requestRefresh(.touchBar) { self.touchBar.showFeedback("Touch Bar刷新已关闭，可在通用设置中开启") }
@@ -129,13 +142,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func alertsChanged() { usageMonitoring.configure() }
     @objc private func showHistory() { openHistory() }
     private func openHistory(kind: UsageWindowKind? = nil) {
-        panel.close()
-        if historyWindow == nil {
-            historyWindow = UsageHistoryWindowController(monitor: usageMonitoring,
-                snapshot: { [weak self] in self?.store.snapshot },
-                isStale: { [weak self] in self?.store.freshness.isStale ?? true })
-        }
-        historyWindow?.show(kind: kind)
+        guard let button = statusItem.button else { return }
+        if !panel.isShown { panel.show(relativeTo: button.bounds, of: button) }
+        panel.showHistory(kind: kind)
     }
     @objc private func showSettings() {
         panel.close()
@@ -175,7 +184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func requestRefresh(_ trigger: QuotaRefreshTrigger, includeResetCreditDetails: Bool = false) -> Bool {
         guard !isSleeping else { return false }
         return Preferences.shared.refreshPolicy.perform(trigger) {
-            store.refresh(includeResetCreditDetails: includeResetCreditDetails)
+            store.refresh(includeResetCreditDetails: includeResetCreditDetails || Preferences.shared.usageAlertOptions.resetExpiry)
         }
     }
 
@@ -196,30 +205,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let isContextClick = event?.type == .rightMouseUp
             || (event?.modifierFlags.contains(.control) ?? false)
         if isContextClick {
-            contextMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY + 4), in: button)
+            panel.close()
+            appMenu.makeMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY + 4), in: button)
             return
         }
         if !panel.isShown { requestRefresh(.menuOpen, includeResetCreditDetails: true) }
         panel.show(relativeTo: button.bounds, of: button)
     }
-
-    private func contextMenu() -> NSMenu {
-        let menu = NSMenu()
-        menu.addItem(menuItem("刷新", #selector(refreshNow), key: "r"))
-        menu.addItem(menuItem("额度曲线…", #selector(showHistory), key: ""))
-        menu.addItem(menuItem("设置…", #selector(showSettings), key: ","))
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(menuItem("退出", #selector(quit), key: "q"))
-        return menu
-    }
-
-    private func menuItem(_ title: String, _ action: Selector, key: String) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
-        item.target = self
-        return item
-    }
-
-    @objc private func refreshNow() { requestRefresh(.manual) }
 
     @objc private func quit() { NSApp.terminate(nil) }
 
@@ -237,7 +229,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             snapshot: snapshot,
             freshness: store.freshness,
             error: store.errorMessage,
-            isRefreshing: store.isRefreshing
+            isRefreshing: store.isRefreshing,
+            recentChanges: usageMonitoring.recentChangesAt == snapshot?.fetchedAt ? usageMonitoring.recentChanges : [:]
         )
         touchBar.update(snapshot: snapshot, freshness: store.freshness, isRefreshing: store.isRefreshing)
         updateTouchBarVisibility()

@@ -15,10 +15,10 @@ final class UsageHistoryRepository: @unchecked Sendable {
     func append(_ points: [UsageObservation], now: Date) async throws {
         try await execute { try $0.append(points, now: now) }
     }
-    func read(_ kind: UsageWindowKind, now: Date) async throws -> UsageHistoryResult {
+    func read(_ kind: UsageWindowKind, now: Date, lookback: TimeInterval? = nil) async throws -> UsageHistoryResult {
         try await execute { database in
             try database.pruneIfNeeded(now: now)
-            return UsageHistoryResult(points: try database.read(kind, now: now), notice: database.notice)
+            return UsageHistoryResult(points: try database.read(kind, now: now, lookback: lookback), notice: database.notice)
         }
     }
     func prune(now: Date) async throws { try await execute { try $0.pruneIfNeeded(now: now) } }
@@ -95,7 +95,7 @@ final class UsageHistoryDatabase: @unchecked Sendable {
                 guard point.time <= now.addingTimeInterval(60), point.time >= now.addingTimeInterval(-point.kind.historyDuration) else { continue }
                 if let previous = try latest(point.kind) {
                     guard point.time > previous.time else { continue }
-                    point.discontinuity = point.changedScope(from: previous)
+                    point.discontinuity = !point.continuesConsumption(from: previous)
                     point.rise = point.recoveryGain(from: previous) != nil
                 }
                 let statement = try prepare("INSERT INTO observations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(kind, minute) DO UPDATE SET time=excluded.time, remaining=excluded.remaining, duration=excluded.duration, reset=excluded.reset, plan=excluded.plan, limit_name=excluded.limit_name, rise=MAX(observations.rise, excluded.rise), discontinuity=MAX(observations.discontinuity, excluded.discontinuity)")
@@ -128,11 +128,11 @@ final class UsageHistoryDatabase: @unchecked Sendable {
         lastPrune = now
     }
 
-    func read(_ kind: UsageWindowKind, now: Date) throws -> [UsageObservation] {
+    func read(_ kind: UsageWindowKind, now: Date, lookback: TimeInterval? = nil) throws -> [UsageObservation] {
         let statement = try prepare("SELECT kind, time, remaining, duration, reset, plan, limit_name, rise, discontinuity FROM observations WHERE kind=? AND time>=? AND time<=? ORDER BY minute")
         defer { sqlite3_finalize(statement) }
         bind(kind.rawValue, to: statement, at: 1)
-        sqlite3_bind_double(statement, 2, now.timeIntervalSince1970 - kind.historyDuration)
+        sqlite3_bind_double(statement, 2, now.timeIntervalSince1970 - min(lookback ?? kind.historyDuration, kind.historyDuration))
         sqlite3_bind_double(statement, 3, now.timeIntervalSince1970)
         return try rows(statement)
     }

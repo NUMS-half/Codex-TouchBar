@@ -69,6 +69,7 @@ private final class PlanTagView: NSView {
     }
 }
 
+@MainActor
 final class PanelController: NSObject, NSPopoverDelegate {
     private let fiveHourCard = QuotaCardView(kind: .fiveHour)
     private let weeklyCard = QuotaCardView(kind: .weekly)
@@ -87,16 +88,22 @@ final class PanelController: NSObject, NSPopoverDelegate {
     private var errorBannerView: NSStackView?
     private var currentErrorMessage: String?
     private let refreshButton = QuotaRefreshButton(frame: .zero)
-    private let historyButton = NSButton(title: "额度曲线…", target: nil, action: nil)
+    private let historyButton = NSButton(title: "额度图表…", target: nil, action: nil)
     private let settingsButton = NSButton(title: "设置…", target: nil, action: nil)
     private let quitButton = NSButton(title: "退出", target: nil, action: nil)
     private let popover = NSPopover()
     private var outsideClickMonitor: Any?
+    private var displayTimer: Timer?
+    private(set) var navigation: MenuPanelNavigationController?
+    private var overview: NSView?
+    private var history: UsageHistoryViewController?
+    private var historySize = UsageHistoryViewController.panelSize
 
     var onRefresh: (() -> Void)?
     var onShowHistory: (() -> Void)?
     var onShowSettings: (() -> Void)?
     var onQuit: (() -> Void)?
+    var onDisplayTick: (() -> Void)?
 
     private let panelWidth: CGFloat = 340
 
@@ -124,8 +131,10 @@ final class PanelController: NSObject, NSPopoverDelegate {
                 $0.heightAnchor.constraint(equalToConstant: 14),
             ])
         }
-        freshnessLabel.textColor = .tertiaryLabelColor
+        freshnessLabel.textColor = .labelColor
+        freshnessLabel.alphaValue = 0.45
         freshnessLabel.font = .systemFont(ofSize: 11, weight: .regular)
+        freshnessLabel.lineBreakMode = .byTruncatingTail
         freshnessLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         errorLabel.font = .systemFont(ofSize: 11, weight: .regular)
         errorLabel.textColor = .systemOrange
@@ -159,32 +168,76 @@ final class PanelController: NSObject, NSPopoverDelegate {
 
     var isShown: Bool { popover.isShown }
 
-    func show(relativeTo positioningRect: NSRect, of view: NSView) {
-        if isShown { close(); return }
+    func configureHistory(monitor: UsageMonitoringController, snapshot: @escaping () -> UsageSnapshot?, isStale: @escaping () -> Bool) {
+        let controller = UsageHistoryViewController(monitor: monitor, snapshot: snapshot, isStale: isStale)
+        controller.onBack = { [weak self] in self?.showOverview() }
+        history = controller
+    }
 
+    func showHistory(kind: UsageWindowKind? = nil) {
+        guard let history, let navigation else { return }
+        popover.animates = false
+        refreshButton.setPresented(false)
+        if errorDetailsPopover.isShown { errorDetailsPopover.performClose(nil) }
+        navigation.show(.history, content: history.view, size: historySize, animated: isShown)
+        history.activate(kind: kind)
+    }
+
+    func showOverview(animated: Bool = true) {
+        guard let navigation, let overview else { return }
+        popover.animates = false
+        history?.deactivate()
+        navigation.show(.overview, content: overview, size: overview.fittingSize, animated: animated && isShown)
+        refreshButton.setPresented(isShown)
+    }
+
+    func reloadHistory() {
+        if navigation?.page == .history { history?.reload() }
+    }
+
+    func waitForHistoryRead() async { await history?.waitForPendingRead() }
+
+    func makePresentationController() -> MenuPanelNavigationController {
         let backdrop = makeContentView()
         let size = backdrop.fittingSize
         backdrop.frame = NSRect(origin: .zero, size: size)
-        let controller = NSViewController()
-        controller.view = backdrop
-        controller.preferredContentSize = size
+        overview = backdrop
+        let controller = MenuPanelNavigationController(overview: backdrop)
+        navigation = controller
+        controller.onResize = { [weak self] size in
+            guard let self, self.popover.isShown else { return }
+            self.popover.contentSize = size
+        }
+        return controller
+    }
+
+    func show(relativeTo positioningRect: NSRect, of view: NSView) {
+        if isShown { close(); return }
+
+        if let screen = view.window?.screen {
+            let preferred = UsageHistoryViewController.panelSize
+            historySize = NSSize(width: min(preferred.width, screen.visibleFrame.width - 32), height: min(preferred.height, screen.visibleFrame.height - 64))
+        }
+        let controller = makePresentationController()
+        popover.animates = true
         popover.contentViewController = controller
-        popover.contentSize = size
+        popover.contentSize = controller.view.bounds.size
         popover.show(relativeTo: positioningRect, of: view, preferredEdge: .minY)
         refreshButton.setPresented(true)
+        onDisplayTick?()
+        displayTimer?.invalidate()
+        displayTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.onDisplayTick?(); self?.reloadHistory() }
+        }
+        displayTimer?.tolerance = 5
         installOutsideClickMonitor()
     }
 
     /// Shared with offscreen UI checks. Exact vertical constraints determine
     /// the panel height, so adding an entry cannot leave a floating empty row.
     func makeContentView() -> NSView {
-        // NSPopover owns the native material, corner radius, and shadow.  The
-        // content view only supplies the panel's layout, so it never needs to
-        // simulate a window with a transparent borderless NSPanel.
-        let backdrop = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: 380))
-        backdrop.material = .popover
-        backdrop.blendingMode = .withinWindow
-        backdrop.state = .active
+        // NSPopover supplies one continuous material for the arrow and body.
+        let backdrop = NSView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: 380))
         backdrop.translatesAutoresizingMaskIntoConstraints = false
 
         let titleAndStatus = NSStackView(views: [titleLabel, freshnessLabel])
@@ -250,6 +303,8 @@ final class PanelController: NSObject, NSPopoverDelegate {
             cards.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 12),
             cards.leadingAnchor.constraint(equalTo: header.leadingAnchor),
             cards.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+            fiveHourCard.widthAnchor.constraint(equalTo: cards.widthAnchor),
+            weeklyCard.widthAnchor.constraint(equalTo: cards.widthAnchor),
             details.topAnchor.constraint(equalTo: cards.bottomAnchor, constant: 11),
             details.leadingAnchor.constraint(equalTo: header.leadingAnchor),
             details.trailingAnchor.constraint(equalTo: header.trailingAnchor),
@@ -268,22 +323,27 @@ final class PanelController: NSObject, NSPopoverDelegate {
     }
 
     func close() {
+        navigation?.stop(); history?.deactivate()
+        displayTimer?.invalidate(); displayTimer = nil
         refreshButton.setPresented(false)
         removeOutsideClickMonitor()
         if errorDetailsPopover.isShown { errorDetailsPopover.performClose(nil) }
         popover.performClose(nil)
     }
 
-    func update(snapshot: UsageSnapshot?, freshness: SnapshotFreshness, error: String?, isRefreshing: Bool) {
-        fiveHourCard.update(snapshot?.fiveHour)
-        weeklyCard.update(snapshot?.weekly)
+    func update(snapshot: UsageSnapshot?, freshness: SnapshotFreshness, error: String?, isRefreshing: Bool,
+                recentChanges: [UsageWindowKind: UsageRecentChange] = [:], now: Date = Date()) {
+        let old = freshness.isStale || snapshot.map { now < $0.fetchedAt || now.timeIntervalSince($0.fetchedAt) > 900 } == true
+        fiveHourCard.update(snapshot?.fiveHour, change: recentChanges[.fiveHour], isStale: old, now: now)
+        weeklyCard.update(snapshot?.weekly, change: recentChanges[.weekly], isStale: old, now: now)
         planTag.update(planType: snapshot?.planType, limitName: snapshot?.limitName)
         creditLabel.stringValue = creditText(snapshot)
         resetLabel.stringValue = snapshot.map { "可用重置：\($0.availableResetCredits) 次" } ?? "可用重置：—"
         let expiry = snapshot?.earliestAvailableResetExpiry.flatMap { $0 > Date() ? $0 : nil }
         resetExpiryLabel.stringValue = expiry.map(resetExpiryText) ?? ""
         resetExpiryLabel.isHidden = expiry == nil
-        freshnessLabel.stringValue = freshnessText(snapshot, freshness)
+        freshnessLabel.stringValue = freshnessText(snapshot, freshness, now: now)
+        freshnessLabel.toolTip = snapshot.map { formatResetDate($0.fetchedAt) }
         currentErrorMessage = error
         errorLabel.stringValue = error.map(errorSummary) ?? ""
         errorBannerView?.isHidden = error == nil
@@ -292,10 +352,9 @@ final class PanelController: NSObject, NSPopoverDelegate {
         }
         errorDetailsButton.isHidden = error == nil
         refreshButton.setRefreshing(isRefreshing)
-        if popover.isShown, let controller = popover.contentViewController {
-            let size = controller.view.fittingSize
-            controller.preferredContentSize = size
-            popover.contentSize = size
+        if popover.isShown, let navigation, navigation.page == .overview, !navigation.isTransitioning, let overview {
+            let size = overview.fittingSize
+            if navigation.view.bounds.size != size { navigation.show(.overview, content: overview, size: size, animated: false) }
         }
     }
 
@@ -326,12 +385,13 @@ final class PanelController: NSObject, NSPopoverDelegate {
         return "额度刷新失败"
     }
 
-    private func freshnessText(_ snapshot: UsageSnapshot?, _ freshness: SnapshotFreshness) -> String {
+    private func freshnessText(_ snapshot: UsageSnapshot?, _ freshness: SnapshotFreshness, now: Date) -> String {
         guard let snapshot else { return "尚未读取额度" }
+        let age = formatObservationAge(snapshot.fetchedAt, now: now)
         switch freshness {
-        case .live: return "在线 · \(formatUpdated(snapshot.fetchedAt))"
-        case .cached: return "缓存 · \(formatUpdated(snapshot.fetchedAt))"
-        case .stale: return "已过期 · \(formatUpdated(snapshot.fetchedAt))"
+        case .live: return now.timeIntervalSince(snapshot.fetchedAt) > 900 ? "较早记录 · \(age)" : age
+        case .cached: return "缓存 · \(age)"
+        case .stale: return "旧数据 · \(age)"
     }
 }
 
@@ -432,6 +492,8 @@ final class PanelController: NSObject, NSPopoverDelegate {
     func popoverShouldDetach(_ popover: NSPopover) -> Bool { false }
 
     func popoverDidClose(_ notification: Notification) {
+        navigation?.stop(); history?.deactivate()
+        displayTimer?.invalidate(); displayTimer = nil
         refreshButton.setPresented(false)
         removeOutsideClickMonitor()
         if errorDetailsPopover.isShown { errorDetailsPopover.performClose(nil) }

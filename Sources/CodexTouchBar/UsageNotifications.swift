@@ -5,6 +5,8 @@ enum UsageNotificationPermission: Equatable {
     case unknown, allowed, denied
 }
 
+enum UsageNotificationError: Error { case permissionDenied }
+
 @MainActor
 protocol UsageNotificationSending: AnyObject {
     func send(_ batch: UsageAlertBatch) async throws
@@ -22,6 +24,7 @@ final class UsageNotificationService: NSObject, UsageNotificationManaging, UNUse
     private let center = UNUserNotificationCenter.current()
     private var authorizationTask: Task<UsageNotificationPermission, Never>?
     var onOpenHistory: ((UsageWindowKind) -> Void)?
+    var onOpenQuota: (() -> Void)?
 
     override init() {
         super.init()
@@ -52,12 +55,16 @@ final class UsageNotificationService: NSObject, UsageNotificationManaging, UNUse
     }
 
     func send(_ batch: UsageAlertBatch) async throws {
-        guard !batch.events.isEmpty, await permission() == .allowed else { return }
+        guard !batch.events.isEmpty else { return }
+        guard await permission() == .allowed else { throw UsageNotificationError.permissionDenied }
         try Task.checkCancellation()
         let content = UNMutableNotificationContent()
         content.title = "Codex 额度提醒"
         content.body = batch.body
         content.userInfo = ["windowKind": batch.selectedKind.rawValue]
+        if batch.events.contains(where: { if case .resetExpiring = $0.reason { return true }; return false }) {
+            content.userInfo["openQuota"] = true
+        }
         // No sound, badge or time-sensitive interruption level.
         try await center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
     }
@@ -73,7 +80,7 @@ final class UsageNotificationService: NSObject, UsageNotificationManaging, UNUse
         guard await permission() == .allowed else { return false }
         let content = UNMutableNotificationContent()
         content.title = "Codex 额度提醒 · 测试"
-        content.body = "这是一条验收测试通知，不代表额度发生变化。可打开菜单栏中的额度曲线查看实际记录。"
+        content.body = "这是一条验收测试通知，不代表额度发生变化。可打开菜单栏中的额度图表查看实际记录。"
         content.userInfo = ["windowKind": UsageWindowKind.fiveHour.rawValue]
         try await center.add(UNNotificationRequest(identifier: "usage-alert-manual-test", content: content, trigger: nil))
         return true
@@ -88,7 +95,10 @@ final class UsageNotificationService: NSObject, UsageNotificationManaging, UNUse
         didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let raw = response.notification.request.content.userInfo["windowKind"] as? String ?? "fiveHour"
         let kind = UsageWindowKind(rawValue: raw) ?? .fiveHour
-        Task { @MainActor [weak self] in self?.onOpenHistory?(kind) }
+        let openQuota = response.notification.request.content.userInfo["openQuota"] as? Bool ?? false
+        Task { @MainActor [weak self] in
+            if openQuota { self?.onOpenQuota?() } else { self?.onOpenHistory?(kind) }
+        }
         completionHandler()
     }
 }
@@ -99,10 +109,14 @@ final class UsageMonitoringController {
     private let preferences: Preferences
     private let sender: any UsageNotificationSending
     private var engine: UsageAlertEngine
+    private var reminders: UsageReminderEngine
+    private(set) var recentChanges: [UsageWindowKind: UsageRecentChange] = [:]
+    private(set) var recentChangesAt: Date?
     private var work: Task<Void, Never>?
     private var maintenanceTimer: Timer?
     private var notificationGeneration = 0
     private var deliveries: [UUID: Task<Void, Never>] = [:]
+    private var reminderDelivery: UUID?
     private(set) var historyError: String?
     private(set) var notificationError: String?
     var onChange: (() -> Void)?
@@ -119,6 +133,9 @@ final class UsageMonitoringController {
             engine = UsageAlertEngine()
         }
         engine.configure(preferences.usageAlertOptions)
+        reminders = preferences.usageReminderState.flatMap { try? JSONDecoder().decode(UsageReminderEngine.self, from: $0) } ?? .init()
+        reminders.configure(expiryEnabled: preferences.usageAlertOptions.resetExpiry)
+        persist() // Drop retired one-shot requests while retaining expiry deduplication.
     }
 
     func start() {
@@ -133,27 +150,57 @@ final class UsageMonitoringController {
         notificationGeneration += 1
         cancelDeliveries()
         engine.configure(preferences.usageAlertOptions)
+        reminders.configure(expiryEnabled: preferences.usageAlertOptions.resetExpiry)
         persist()
+        onChange?()
     }
 
     func consume(_ snapshot: UsageSnapshot) {
         let observations = UsageObservation.from(snapshot)
-        let events = engine.consume(observations)
+        var events = engine.consume(observations)
+        let candidates = reminders.consume(snapshot, now: Date())
+        let reminderEvents = reminderDelivery == nil ? candidates : []
+        for event in reminderEvents where !events.contains(event) { events.append(event) }
         persist()
         let previous = work
         work = Task { [weak self, history] in
             await previous?.value
-            do { try await history.append(observations, now: snapshot.fetchedAt); self?.historyError = nil }
-            catch { self?.historyError = "历史记录保存失败；当前额度显示不受影响。" }
+            do {
+                try await history.append(observations, now: snapshot.fetchedAt)
+                var changes: [UsageWindowKind: UsageRecentChange] = [:]
+                for point in observations {
+                    let result = try await history.read(point.kind, now: point.time,
+                        lookback: UsageRecentChange.lookback(point.kind))
+                    changes[point.kind] = UsageRecentChange.summarize(result.points, current: point)
+                }
+                self?.recentChanges = changes
+                self?.recentChangesAt = snapshot.fetchedAt
+                self?.historyError = nil
+            } catch {
+                self?.recentChanges = [:]
+                self?.recentChangesAt = nil
+                self?.historyError = "历史记录读写失败；当前额度显示不受影响。"
+            }
             self?.onChange?()
         }
         if !events.isEmpty {
             let generation = notificationGeneration
             let id = UUID()
+            if !reminderEvents.isEmpty { reminderDelivery = id }
             deliveries[id] = Task { [weak self, sender] in
                 guard let self, generation == self.notificationGeneration else { return }
-                defer { self.deliveries[id] = nil }
-                do { try await sender.send(.init(events: events, observations: observations)); self.notificationError = nil }
+                defer {
+                    self.deliveries[id] = nil
+                    if self.reminderDelivery == id { self.reminderDelivery = nil }
+                }
+                do {
+                    try await sender.send(.init(events: events, observations: observations))
+                    try Task.checkCancellation()
+                    guard generation == self.notificationGeneration else { return }
+                    self.reminders.acknowledge(reminderEvents)
+                    self.persist()
+                    self.notificationError = nil
+                }
                 catch is CancellationError { return }
                 catch { self.notificationError = "系统通知发送失败，请检查通知设置。" }
                 self.onChange?()
@@ -165,12 +212,18 @@ final class UsageMonitoringController {
         notificationGeneration += 1
         cancelDeliveries()
         engine.reset()
+        recentChanges = [:]
+        recentChangesAt = nil
         persist()
         let previous = work
         var succeeded = false
         let task = Task { [weak self, history] in
             await previous?.value
-            do { try await history.clear(); self?.historyError = nil; succeeded = true }
+            do {
+                try await history.clear()
+                self?.historyError = nil; self?.recentChanges = [:]; self?.recentChangesAt = nil
+                succeeded = true
+            }
             catch { self?.historyError = "历史记录未能清空，请稍后重试。" }
             self?.onChange?()
         }
@@ -180,10 +233,14 @@ final class UsageMonitoringController {
     }
 
     func waitForPendingWrites() async { await work?.value }
+    func waitForPendingDeliveries() async {
+        for task in Array(deliveries.values) { await task.value }
+    }
 
     private func cancelDeliveries() {
         deliveries.values.forEach { $0.cancel() }
         deliveries.removeAll()
+        reminderDelivery = nil
     }
 
     private func prune() {
@@ -199,5 +256,7 @@ final class UsageMonitoringController {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         let data = try? encoder.encode(engine)
         if data != preferences.usageAlertState { preferences.usageAlertState = data }
+        let remindersData = try? encoder.encode(reminders)
+        if remindersData != preferences.usageReminderState { preferences.usageReminderState = remindersData }
     }
 }

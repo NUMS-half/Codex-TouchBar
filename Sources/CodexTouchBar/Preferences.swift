@@ -16,6 +16,7 @@ final class Preferences {
         static let loginSetupAttempted = "loginSetupAttempted"
         static let alertOptions = "usageAlerts.options.v1"
         static let alertState = "usageAlerts.state.v1"
+        static let reminderState = "usageReminders.state.v1"
     }
 
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
@@ -36,6 +37,11 @@ final class Preferences {
     var usageAlertState: Data? {
         get { defaults.data(forKey: Key.alertState) }
         set { defaults.set(newValue, forKey: Key.alertState) }
+    }
+
+    var usageReminderState: Data? {
+        get { defaults.data(forKey: Key.reminderState) }
+        set { defaults.set(newValue, forKey: Key.reminderState) }
     }
 
     var touchBarConfiguration: TouchBarConfiguration {

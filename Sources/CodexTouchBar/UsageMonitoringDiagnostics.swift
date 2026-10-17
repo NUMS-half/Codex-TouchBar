@@ -12,7 +12,7 @@ enum UsageMonitoringDiagnostics {
     }
     static func run() -> Bool {
         do {
-            try alerts(); try history(); try chart()
+            try alerts(); try history(); try chart(); try QuotaExperienceDiagnostics.run()
             print("Usage monitoring self-test passed (alerts, history, chart data)")
             return true
         } catch {
@@ -114,10 +114,28 @@ enum UsageMonitoringDiagnostics {
             try db!.append([point(70, 180, kind: .weekly)], now: Date(timeIntervalSince1970: 180))
             try db!.pruneIfNeeded(now: Date(timeIntervalSince1970: 49 * 3_600))
             try check(tryReadCount(db!, .fiveHour, 49 * 3_600) == 0 && tryReadCount(db!, .weekly, 49 * 3_600) == 1, "independent retention")
-            try db!.pruneIfNeeded(now: Date(timeIntervalSince1970: 15 * 86_400))
-            try check(tryReadCount(db!, .weekly, 15 * 86_400) == 0, "weekly retention")
+            try db!.pruneIfNeeded(now: Date(timeIntervalSince1970: 11 * 86_400))
+            try check(tryReadCount(db!, .weekly, 11 * 86_400) == 0, "weekly retention")
         }
         db = nil
+
+        let retentionURL = root.appendingPathComponent("retention.sqlite")
+        let boundary = 10_000.0
+        do {
+            let old = UsageHistoryDatabase(url: retentionURL)
+            try old.recovering {
+                try old.append([point(80, boundary - 60, kind: .weekly), point(70, boundary, kind: .weekly),
+                                point(60, boundary + 86_400, kind: .weekly)], now: Date(timeIntervalSince1970: boundary + 86_400))
+            }
+        }
+        let reopened = UsageHistoryDatabase(url: retentionURL)
+        try reopened.recovering {
+            let now = Date(timeIntervalSince1970: boundary + 10 * 86_400)
+            try reopened.pruneIfNeeded(now: now)
+            let kept = try reopened.read(.weekly, now: now)
+            try check(kept.count == 2 && kept.first?.time.timeIntervalSince1970 == boundary,
+                      "reopened history drops records older than ten days and keeps the exact boundary")
+        }
 
         let brokenURL = root.appendingPathComponent("broken.sqlite")
         let damaged = Data("deliberately invalid sqlite fixture".utf8)
@@ -150,37 +168,78 @@ enum UsageMonitoringDiagnostics {
         try full.recovering {
             try full.append(samples, now: now)
             try check(tryReadCount(full, .fiveHour, now.timeIntervalSince1970) == 2_880, "48 hour capacity")
-            try check(tryReadCount(full, .weekly, now.timeIntervalSince1970) == 20_160, "14 day capacity")
+            try check(tryReadCount(full, .weekly, now.timeIntervalSince1970) == 14_400, "10 day capacity")
         }
         let size = ["", "-wal", "-shm"].reduce(Int64(0)) { total, suffix in
             let attributes = try? FileManager.default.attributesOfItem(atPath: fullURL.path + suffix)
             return total + ((attributes?[.size] as? NSNumber)?.int64Value ?? 0)
         }
-        print("History capacity: 23040 samples, SQLite + sidecars \(size) bytes, fixture write/read \(String(format: "%.2f", Date().timeIntervalSince(start)))s")
+        print("History capacity: 17280 samples, SQLite + sidecars \(size) bytes, fixture write/read \(String(format: "%.2f", Date().timeIntervalSince(start)))s")
         try full.recovering { try full.clear(); try check(tryReadCount(full, .weekly, now.timeIntervalSince1970) == 0, "clear both histories") }
     }
     private static func tryReadCount(_ database: UsageHistoryDatabase, _ kind: UsageWindowKind, _ now: Double) -> Int {
         (try? database.read(kind, now: Date(timeIntervalSince1970: now)).count) ?? -1
     }
     static func chart() throws {
-        var rise = point(90, 120); rise.rise = true
-        let series = UsageChartSeries.segments([point(50, 0), point(40, 60), rise, point(80, 180), point(70, 2_000), point(70, 2_060, plan: "pro")])
-        try check(series.map(\.count) == [2, 2, 1, 1], "gap, scope and rise break lines")
-        let connections = UsageChartSeries.estimatedConnections(series)
-        try check(connections.count == 3, "every break has an estimated bridge")
-        for (index, connection) in connections.enumerated() {
-            try check(connection.from == series[index].last && connection.to == series[index + 1].first,
-                      "bridges join actual endpoints without extrapolation")
+        try check(UsageChartRange.fiveHourOptions == [.sixHours, .twelveHours]
+                  && UsageChartRange.defaultRange(for: .fiveHour) == .sixHours,
+                  "5H offers only six and twelve hours with a six-hour default")
+        let samples = (0..<144).map { point(100 - $0 / 2, Double($0 * 300 + 60)) }
+        for (range, count, interval) in [(UsageChartRange.sixHours, 36, 600.0), (.twelveHours, 48, 900.0)] {
+            let bars = UsageChartBucket.make(samples, range: range,
+                start: Date(timeIntervalSince1970: 0), end: Date(timeIntervalSince1970: range.duration))
+            try check(range.bucketInterval == interval && bars.count == count
+                      && bars.reduce(0) { $0 + $1.count } == Int(range.duration / 300),
+                      "selected range preserves its visible records at the requested resolution")
         }
-        try check(UsageChartSeries.estimatedConnections([]).isEmpty && UsageChartSeries.estimatedConnections([[point(16, 0)]]).isEmpty,
-                  "empty and single-point histories do not fabricate lines")
-        let gap = UsageChartSeries.segments([point(16, 0), point(16, 7_800)])
-        let gapBridge = UsageChartSeries.estimatedConnections(gap)
-        try check(gapBridge.count == 1 && gapBridge[0].from.remaining == gapBridge[0].to.remaining,
-                  "130-minute equal-balance gap receives horizontal estimated connection")
-        let full = (0..<20_160).map { point($0 == 100 ? 0 : ($0 == 101 ? 100 : 50), Double($0 * 60), kind: .weekly) }
-        let reduced = UsageChartSeries.reduced(full, start: full[0].time, duration: UsageWindowKind.weekly.historyDuration, width: 500)
-        try check(reduced.count <= 2_004 && reduced.contains(where: { $0.remaining == 0 }) && reduced.contains(where: { $0.remaining == 100 }), "pixel reduction retains extrema")
-        try check(reduced.first == full.first && reduced.last == full.last, "reduction retains endpoints")
+        for range in UsageChartRange.allCases {
+            let records = [point(80, 1_060, kind: range.kind), point(20, 30_000, kind: range.kind)]
+            let selected = UsageChartBucket.make(records, range: range,
+                start: Date(timeIntervalSince1970: 1_000), end: Date(timeIntervalSince1970: 1_000 + range.duration))
+            try check(selected.reduce(0) { $0 + $1.count } == (range == .sixHours ? 1 : 2), "range filtering keeps only visible observed samples")
+        }
+        func gap(_ from: UsageObservation, _ to: UsageObservation) -> [UsageChartBucket] {
+            UsageChartBucket.make([from, to], range: .twelveHours,
+                start: Date(timeIntervalSince1970: 0), end: Date(timeIntervalSince1970: 10_000))
+        }
+        let bars = UsageChartBucket.make([point(40, 1_100, reset: 5_000), point(80, 1_050, reset: 5_000),
+            point(0, 1_075, reset: 5_000), point(20, 3_150, reset: 5_000), point(90, 800),
+            point(50, 3_750), point(95, 1_100, kind: .weekly)], range: .twelveHours,
+            start: Date(timeIntervalSince1970: 900), end: Date(timeIntervalSince1970: 3_600))
+        try check(bars.count == 3 && bars[0].remaining == 40 && bars[0].count == 3,
+                  "bar height is last query, not a total, average or array order")
+        try check(bars[0].minimum == 0 && bars[0].maximum == 80, "observed extrema survive aggregation")
+        try check(bars[1].start == Date(timeIntervalSince1970: 1_800) && bars[1].remaining == 29
+                  && bars[1].estimateKind == .consumption && bars[1].count == 0,
+                  "same-cycle declining gap can be interpolated")
+        try check(bars.reduce(0) { $0 + $1.count } == 4, "estimated columns never become observed records")
+        let before = point(20, 1_100, reset: 1_500)
+        let after = point(100, 4_050, reset: 7_500)
+        let resetGap = gap(before, after)
+        let held = resetGap.filter(\.isEstimated)
+        try check(held.count == 2 && held.allSatisfy { $0.remaining == 20 && $0.estimateKind == .lastKnown }
+                  && resetGap.last?.remaining == 100, "refresh is a step, never an upward ramp")
+        let partial = gap(before, point(75, 4_050, reset: 7_500))
+        try check(partial.allSatisfy { $0.remaining == 20 || $0.remaining == 75 }, "unobserved full quota is never fabricated")
+        let rising = gap(point(40, 1_100, reset: 7_500), point(45, 4_050, reset: 7_500))
+        try check(rising.filter(\.isEstimated).allSatisfy { $0.remaining == 40 }, "small rises do not produce upward interpolation")
+        let changed = gap(before, point(10, 4_050, reset: 7_500, plan: "pro"))
+        try check(changed.filter(\.isEstimated).allSatisfy { $0.remaining == 20 }, "scope changes are not consumption")
+        let expired = gap(point(40, 1_100, reset: 1_500), point(10, 4_050, reset: 1_500))
+        try check(expired.filter(\.isEstimated).allSatisfy { $0.estimateKind == .lastKnown }, "expired cycle is not interpolated")
+        var unknown = before; unknown.reset = nil
+        try check(gap(unknown, after).filter(\.isEstimated).allSatisfy { $0.estimateKind == .lastKnown }, "unknown reset is conservative")
+        try check(resetGap.first?.start == Date(timeIntervalSince1970: 900)
+                  && resetGap.last?.end == Date(timeIntervalSince1970: 4_500), "no leading or trailing invented history")
+        let zero = gap(point(0, 1_100), point(0, 1_100))
+        try check(zero.count == 1 && zero[0].remaining == 0 && !zero[0].isEstimated, "measured zero is not missing")
+        let edge = UsageChartBucket.make([point(60, 3_600)], range: .twelveHours,
+            start: Date(timeIntervalSince1970: 900), end: Date(timeIntervalSince1970: 3_600))
+        try check(edge.count == 1, "query at right range boundary is retained")
+        let full = (0..<14_400).map { point($0 == 100 ? 0 : ($0 == 101 ? 100 : 50), Double($0 * 60), kind: .weekly) }
+        let compact = UsageChartBucket.make(full, range: .tenDays, start: full[0].time, end: full.last!.time)
+        try check(UsageChartRange.tenDays.duration == 10 * 86_400 && UsageChartRange.tenDays.bucketInterval == 21_600
+                  && compact.count == 40 && compact.reduce(0) { $0 + $1.count } == 14_400
+                  && compact.contains { $0.minimum == 0 && $0.maximum == 100 }, "ten-day weekly view has forty six-hour bars")
     }
 }

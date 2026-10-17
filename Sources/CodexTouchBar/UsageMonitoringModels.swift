@@ -1,7 +1,7 @@
 import Foundation
 
 extension UsageWindowKind {
-    var historyDuration: TimeInterval { self == .fiveHour ? 48 * 3_600 : 14 * 86_400 }
+    var historyDuration: TimeInterval { self == .fiveHour ? 48 * 3_600 : 10 * 86_400 }
 }
 
 struct UsageObservation: Codable, Equatable, Sendable {
@@ -32,6 +32,19 @@ struct UsageObservation: Codable, Equatable, Sendable {
             || changed(limitName, previous.limitName)
     }
 
+    /// Also persisted through minute coalescing, so an intervening rise cannot disappear.
+    func continuesConsumption(from previous: Self) -> Bool {
+        let sameReset: Bool
+        switch (reset, previous.reset) {
+        case (nil, nil): sameReset = true
+        case let (current?, old?): sameReset = abs(current.timeIntervalSince(old)) < 1
+        default: sameReset = false
+        }
+        return kind == previous.kind && time > previous.time && time.timeIntervalSince(previous.time) <= 900
+            && remaining <= previous.remaining && duration == previous.duration
+            && plan == previous.plan && limitName == previous.limitName && sameReset
+    }
+
     /// Chart annotation thresholds, separate from user-configured alert targets.
     func recoveryGain(from previous: Self) -> Int? {
         guard !changedScope(from: previous), remaining > 20 else { return nil }
@@ -51,6 +64,7 @@ struct UsageAlertOptions: Codable, Equatable, Sendable {
     var weeklyLowThreshold = 20
     var fiveHourRecoveryThreshold = 100
     var weeklyRecoveryThreshold = 100
+    var resetExpiry = false
     func low(_ kind: UsageWindowKind) -> Bool { kind == .fiveHour ? fiveHourLow : weeklyLow }
     func recovery(_ kind: UsageWindowKind) -> Bool { kind == .fiveHour ? fiveHourRecovery : weeklyRecovery }
     func lowThreshold(_ kind: UsageWindowKind) -> Int {
@@ -61,10 +75,11 @@ struct UsageAlertOptions: Codable, Equatable, Sendable {
         let value = kind == .fiveHour ? fiveHourRecoveryThreshold : weeklyRecoveryThreshold
         return (1...100).contains(value) ? value : 100
     }
-    var anyEnabled: Bool { fiveHourLow || weeklyLow || fiveHourRecovery || weeklyRecovery }
+    var anyEnabled: Bool { fiveHourLow || weeklyLow || fiveHourRecovery || weeklyRecovery || resetExpiry }
     enum CodingKeys: String, CodingKey {
         case fiveHourLow, weeklyLow, fiveHourRecovery, weeklyRecovery
         case fiveHourLowThreshold, weeklyLowThreshold, fiveHourRecoveryThreshold, weeklyRecoveryThreshold
+        case resetExpiry
     }
 }
 
@@ -76,6 +91,7 @@ extension UsageAlertOptions {
         weeklyLow = try container.decodeIfPresent(Bool.self, forKey: .weeklyLow) ?? false
         fiveHourRecovery = try container.decodeIfPresent(Bool.self, forKey: .fiveHourRecovery) ?? false
         weeklyRecovery = try container.decodeIfPresent(Bool.self, forKey: .weeklyRecovery) ?? false
+        resetExpiry = try container.decodeIfPresent(Bool.self, forKey: .resetExpiry) ?? false
         func threshold(_ key: CodingKeys, default fallback: Int) -> Int {
             guard let value = try? container.decode(Int.self, forKey: key), (1...100).contains(value) else { return fallback }
             return value
@@ -88,7 +104,7 @@ extension UsageAlertOptions {
 }
 
 struct UsageAlertEvent: Equatable, Sendable {
-    enum Reason: Equatable, Sendable { case low(Int), recovered }
+    enum Reason: Equatable, Sendable { case low(Int), recovered, resetExpiring(Date) }
     let kind: UsageWindowKind
     let remaining: Int
     let reason: Reason
@@ -96,6 +112,7 @@ struct UsageAlertEvent: Equatable, Sendable {
         switch reason {
         case .low(let threshold): return "\(kind.title) 额度低于 \(threshold)%，当前剩余 \(remaining)%"
         case .recovered: return "\(kind.title) 额度已恢复至 \(remaining)%"
+        case .resetExpiring(let date): return "最近一次可用重置机会将在\(formatResetDate(date))到期，请及时查看。"
         }
     }
 }

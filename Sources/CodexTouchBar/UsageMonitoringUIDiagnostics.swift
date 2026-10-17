@@ -33,6 +33,10 @@ enum UsageMonitoringUIDiagnostics {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             try refreshScheduling()
             try await refreshFeedback()
+            try await QuotaExperienceUIDiagnostics.run(folder: folder)
+            try await PanelNavigationUIDiagnostics.run(folder: folder)
+            try UsageChartRangeUIDiagnostics.run(folder: folder)
+            try MenuPanelAppearanceUIDiagnostics.run(folder: folder)
             let preferences = Preferences(defaults: defaults)
             let service = FakeNotifications()
             let counts = Counts()
@@ -108,35 +112,42 @@ enum UsageMonitoringUIDiagnostics {
             try check(service.sent.count == 1, "clear reestablishes baseline")
 
             var chartSnapshot: UsageSnapshot? = low
-            let historyWindow = UsageHistoryWindowController(monitor: monitor, snapshot: { chartSnapshot })
-            let chartContent = historyWindow.window!.contentView!
+            let historyWindow = UsageHistoryViewController(monitor: monitor, snapshot: { chartSnapshot })
+            let historyHost = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 560), styleMask: .borderless, backing: .buffered, defer: false)
+            historyHost.contentView = historyWindow.view
+            let chartContent = historyWindow.view
             let chart = UIDiagnosticSupport.descendants(chartContent).compactMap { $0 as? UsageChartView }.first!
             chart.kind = .weekly; chart.end = now
-            let fixtures = (0..<20_160).map { index -> UsageObservation in
-                var point = UsageMonitoringDiagnostics.point(100 - (index / 120) % 100, now.timeIntervalSince1970 - 14 * 86_400 + Double(index * 60 + 60), kind: .weekly)
+            let fixtures = (0..<14_400).map { index -> UsageObservation in
+                var point = UsageMonitoringDiagnostics.point(100 - (index / 120) % 100, now.timeIntervalSince1970 - 10 * 86_400 + Double(index * 60 + 60), kind: .weekly)
                 point.rise = index > 0 && index % 12_000 == 0
                 return point
             }
             for appearance in [NSAppearance.Name.aqua, .darkAqua] {
-                historyWindow.window?.appearance = NSAppearance(named: appearance)
+                historyHost.appearance = NSAppearance(named: appearance)
                 historyWindow.display(.init(points: fixtures, notice: nil), kind: .weekly, now: now)
                 let began = Date()
                 try UIDiagnosticSupport.render(chartContent, to: folder.appendingPathComponent("history-\(appearance.rawValue).png"))
-                print("Chart render: 20160 raw samples, \(String(format: "%.3f", Date().timeIntervalSince(began)))s, \(appearance.rawValue)")
+                print("Chart render: 14400 raw samples, \(String(format: "%.3f", Date().timeIntervalSince(began)))s, \(appearance.rawValue)")
             }
+            // Existing hover/annotation checks exercise the twelve-hour range.
+            historyWindow.display(.init(points: [], notice: nil), kind: .fiveHour, now: now)
+            let rangeControl = UIDiagnosticSupport.descendants(chartContent).compactMap { $0 as? NSSegmentedControl }.first { $0.accessibilityLabel() == "5H显示范围" }!
+            rangeControl.selectedSegment = 1
+            NSApp.sendAction(rangeControl.action!, to: rangeControl.target, from: rangeControl)
             var interrupted: [UsageObservation] = []
             for index in 0..<24 {
-                interrupted.append(UsageMonitoringDiagnostics.point(80 - index, now.timeIntervalSince1970 - 44 * 3_600 + Double(index * 600)))
+                interrupted.append(UsageMonitoringDiagnostics.point(80 - index, now.timeIntervalSince1970 - 11 * 3_600 + Double(index * 600)))
             }
             for index in 0..<24 {
-                var point = UsageMonitoringDiagnostics.point(95 - index, now.timeIntervalSince1970 - 20 * 3_600 + Double(index * 600))
+                var point = UsageMonitoringDiagnostics.point(95 - index, now.timeIntervalSince1970 - 5 * 3_600 + Double(index * 600))
                 point.rise = index == 0
                 interrupted.append(point)
             }
             interrupted.append(UsageMonitoringDiagnostics.point(16, now.timeIntervalSince1970))
             chartSnapshot = snapshot(16, at: now)
             for appearance in [NSAppearance.Name.aqua, .darkAqua] {
-                historyWindow.window?.appearance = NSAppearance(named: appearance)
+                historyHost.appearance = NSAppearance(named: appearance)
                 historyWindow.display(.init(points: interrupted, notice: nil), kind: .fiveHour, now: now)
                 try UIDiagnosticSupport.render(chartContent, to: folder.appendingPathComponent("history-dashed-\(appearance.rawValue).png"))
             }
@@ -153,17 +164,17 @@ enum UsageMonitoringUIDiagnostics {
                 case ..<1_410: remaining = 100 - (minute - 1_320) * 45 / 90
                 default: remaining = 100
                 }
-                var point = UsageMonitoringDiagnostics.point(remaining, now.timeIntervalSince1970 - 86_400 + Double(minute * 60))
+                var point = UsageMonitoringDiagnostics.point(remaining, now.timeIntervalSince1970 - 21_600 + Double(minute * 15))
                 point.rise = [240, 780, 1_200, 1_410].contains(minute)
                 dense.append(point)
             }
             chartSnapshot = snapshot(100, at: now)
             for appearance in [NSAppearance.Name.aqua, .darkAqua] {
-                historyWindow.window?.appearance = NSAppearance(named: appearance)
+                historyHost.appearance = NSAppearance(named: appearance)
                 historyWindow.display(.init(points: dense, notice: nil), kind: .fiveHour, now: now)
                 chartContent.layoutSubtreeIfNeeded()
                 let plot = NSRect(x: 50, y: 37, width: chart.bounds.width - 70, height: chart.bounds.height - 89)
-                let labels = UsageChartAnnotations.layout(dense, start: now.addingTimeInterval(-48 * 3_600), duration: 48 * 3_600, plot: plot)
+                let labels = UsageChartAnnotations.layout(dense, start: now.addingTimeInterval(-12 * 3_600), duration: 12 * 3_600, plot: plot)
                 try check(labels.count < 4 && labels.flatMap(\.points).count == 4, "dense labels aggregate without losing events")
                 for label in labels {
                     try check(label.rect.minX >= plot.minX && label.rect.maxX <= plot.maxX, "event labels stay inside edge")
@@ -176,7 +187,61 @@ enum UsageMonitoringUIDiagnostics {
                 let clearBounds = chartContent.convert(clear.alignmentRect(forFrame: clear.frame), from: clear.superview)
                 try check(abs(clearBounds.maxX - (chartContent.bounds.maxX - 22)) < 1, "clear action aligns to trailing content edge")
             }
-            historyWindow.window!.setContentSize(NSSize(width: 620, height: 420))
+            historyHost.setContentSize(NSSize(width: 620, height: 460))
+            try check(UIDiagnosticSupport.descendants(chartContent).compactMap { $0 as? NSSegmentedControl }.count == 2,
+                      "chart has quota and time-range selection, no curve toggle")
+            var barSamples: [UsageObservation] = []
+            for index in 0...288 where !(70..<90).contains(index) {
+                var point = UsageMonitoringDiagnostics.point(max(0, 100 - (index % 36) * 3),
+                    now.timeIntervalSince1970 - 48 * 3_600 + Double(index * 600))
+                point.rise = index > 0 && index % 36 == 0
+                barSamples.append(point)
+            }
+            chartSnapshot = snapshot(barSamples.last!.remaining, at: now)
+            for size in [NSSize(width: 760, height: 560), NSSize(width: 620, height: 460)] {
+                historyHost.setContentSize(size)
+                historyWindow.display(.init(points: barSamples, notice: nil), kind: .fiveHour, now: now)
+                for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+                    historyHost.appearance = NSAppearance(named: appearance)
+                    chartContent.layoutSubtreeIfNeeded()
+                    chart.updateHover(at: NSPoint(x: chart.bounds.width * 0.64, y: chart.bounds.height * 0.45))
+                    try UIDiagnosticSupport.render(chartContent, to: folder.appendingPathComponent("history-bars-\(Int(size.width))-\(appearance.rawValue).png"))
+                    for control in UIDiagnosticSupport.descendants(chartContent).filter({ $0 is NSControl && !$0.isHidden }) {
+                        let rect = chartContent.convert(control.alignmentRect(forFrame: control.frame), from: control.superview)
+                        try check(chartContent.bounds.insetBy(dx: -1, dy: -1).contains(rect), "chart controls fit the compact panel")
+                    }
+                }
+            }
+            historyHost.setContentSize(NSSize(width: 760, height: 560))
+            historyWindow.display(.init(points: fixtures, notice: nil), kind: .weekly, now: now)
+            chartContent.layoutSubtreeIfNeeded()
+            for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+                historyHost.appearance = NSAppearance(named: appearance)
+                chart.updateHover(at: NSPoint(x: chart.bounds.width * 0.6, y: chart.bounds.height * 0.4))
+                try UIDiagnosticSupport.render(chartContent, to: folder.appendingPathComponent("history-bars-weekly-\(appearance.rawValue).png"))
+            }
+            let edgeTime = Date(timeIntervalSince1970: floor(now.timeIntervalSince1970 / 900) * 900)
+            let edgeStart = edgeTime.addingTimeInterval(-12 * 3_600)
+            let edgeSamples = [UsageMonitoringDiagnostics.point(80, edgeStart.timeIntervalSince1970 + 60),
+                               UsageMonitoringDiagnostics.point(0, edgeStart.timeIntervalSince1970 + 960),
+                               UsageMonitoringDiagnostics.point(40, edgeTime.timeIntervalSince1970)]
+            historyWindow.display(.init(points: edgeSamples, notice: nil), kind: .fiveHour, now: edgeTime)
+            chartContent.layoutSubtreeIfNeeded()
+            let hitPlot = NSRect(x: 50, y: 37, width: chart.bounds.width - 70, height: chart.bounds.height - 89)
+            func hover(_ fraction: Double) {
+                chart.updateHover(at: NSPoint(x: hitPlot.minX + hitPlot.width * fraction, y: hitPlot.midY))
+            }
+            hover(0.001)
+            try check(chart.accessibilityHelp()?.contains("剩余80%") == true, "left partial bucket hover selects its actual reading")
+            hover(1.5 / 48)
+            try check(chart.accessibilityHelp()?.contains("剩余0%") == true, "zero bucket is hoverable and distinct from empty time")
+            try UIDiagnosticSupport.render(chartContent, to: folder.appendingPathComponent("history-zero-hover.png"))
+            hover(0.5)
+            try check(chart.accessibilityHelp()?.contains("非实测") == true, "interpolated gap identifies itself instead of borrowing an actual record")
+            chart.updateHover(at: NSPoint(x: hitPlot.maxX - 1, y: hitPlot.midY))
+            try check(chart.accessibilityHelp()?.contains("剩余40%") == true, "right boundary reading has a visible hover target")
+            try UIDiagnosticSupport.render(chartContent, to: folder.appendingPathComponent("history-edge-hover.png"))
+            historyHost.setContentSize(NSSize(width: 620, height: 460))
             historyWindow.display(.init(points: [], notice: nil), kind: .fiveHour, now: now)
             try UIDiagnosticSupport.render(chartContent, to: folder.appendingPathComponent("history-empty.png"))
             chartSnapshot = snapshot(10, at: now)

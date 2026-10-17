@@ -1,5 +1,41 @@
 import AppKit
 
+if CommandLine.arguments.contains("--update-check-self-test") {
+    MainActor.assumeIsolated {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        Task { @MainActor in
+            do {
+                let release = try await AppReleaseClient().latest()
+                print("Live update check passed: latest public stable release \(release.tag)")
+                exit(0)
+            } catch { print("Live update check failed: \(error.localizedDescription)"); exit(1) }
+        }
+        NSApplication.shared.run()
+    }
+}
+
+if CommandLine.arguments.contains("--app-menu-self-test") {
+    MainActor.assumeIsolated {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        Task { @MainActor in
+            let folder = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("build/app-menu-previews")
+            exit(await AppMenuUIDiagnostics.run(folder: folder) ? 0 : 1)
+        }
+        NSApplication.shared.run()
+    }
+}
+
+if CommandLine.arguments.contains("--panel-motion-self-test") {
+    MainActor.assumeIsolated {
+        NSApplication.shared.setActivationPolicy(.accessory)
+        Task { @MainActor in
+            let folder = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("build/panel-motion")
+            exit(await PanelMotionDiagnostics.run(folder: folder) ? 0 : 1)
+        }
+        NSApplication.shared.run()
+    }
+}
+
 if CommandLine.arguments.contains("--notification-self-test") {
     MainActor.assumeIsolated {
         NSApplication.shared.setActivationPolicy(.prohibited)
