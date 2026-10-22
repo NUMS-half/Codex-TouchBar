@@ -34,6 +34,8 @@ enum UsageMonitoringUIDiagnostics {
             try refreshScheduling()
             try await refreshFeedback()
             try await QuotaExperienceUIDiagnostics.run(folder: folder)
+            try await PlanCompatibilityUIDiagnostics.run(folder: folder)
+            try await TouchBarSupportUIDiagnostics.monitoring()
             try await PanelNavigationUIDiagnostics.run(folder: folder)
             try UsageChartRangeUIDiagnostics.run(folder: folder)
             try MenuPanelAppearanceUIDiagnostics.run(folder: folder)

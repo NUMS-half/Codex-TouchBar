@@ -159,6 +159,13 @@ struct UsageAlertEngine: Codable {
 
     mutating func reset() { states.removeAll() }
 
+    mutating func resetMissingWindows(in points: [UsageObservation]) {
+        let present = Set(points.map(\.kind))
+        for kind in UsageWindowKind.allCases where !present.contains(kind) {
+            states[kind.rawValue] = nil
+        }
+    }
+
     mutating func consume(_ points: [UsageObservation]) -> [UsageAlertEvent] {
         var events: [UsageAlertEvent] = []
         for point in points {

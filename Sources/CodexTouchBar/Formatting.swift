@@ -1,6 +1,19 @@
 import AppKit
 import Foundation
 
+/// Presentation only; raw plan values continue to identify observation scopes.
+func displayPlanName(_ value: String) -> String {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    let key = trimmed.split(whereSeparator: \.isWhitespace).joined().lowercased()
+    switch key {
+    case "free": return "Free"
+    case "go": return "Go"
+    case "plus": return "Plus"
+    case "pro", "prolite", "promax", "prox5", "prox20": return "Pro"
+    default: return trimmed
+    }
+}
+
 private let fullDateFormatter: DateFormatter = {
     let formatter = DateFormatter()
     formatter.locale = Locale.current

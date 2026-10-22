@@ -36,7 +36,7 @@ struct UsageSnapshot: Codable, Sendable, Equatable {
     let limitName: String?
     let creditBalance: String?
     let unlimitedCredits: Bool
-    let availableResetCredits: Int
+    let availableResetCredits: Int?
     let fetchedAt: Date
     let earliestAvailableResetExpiry: Date?
 
@@ -47,7 +47,7 @@ struct UsageSnapshot: Codable, Sendable, Equatable {
         limitName: String?,
         creditBalance: String?,
         unlimitedCredits: Bool,
-        availableResetCredits: Int,
+        availableResetCredits: Int?,
         fetchedAt: Date,
         earliestAvailableResetExpiry: Date? = nil
     ) {
@@ -111,9 +111,6 @@ protocol UsageProvider: Sendable {
 /// Converts the app-server JSON response into stable UI values. It deliberately
 /// identifies windows by duration instead of historical primary/secondary positions.
 enum UsageSnapshotParser {
-    private static let fiveHourRange = 240...360
-    private static let weeklyRange = 8_640...11_520
-
     static func parse(data: Data, now: Date = Date()) throws -> UsageSnapshot {
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw UsageServiceError.invalidResponse
@@ -154,7 +151,7 @@ enum UsageSnapshotParser {
             limitName: limits["limitName"] as? String,
             creditBalance: credits?["balance"] as? String,
             unlimitedCredits: bool(credits?["unlimited"]) ?? false,
-            availableResetCredits: int(resetSummary?["availableCount"]) ?? 0,
+            availableResetCredits: int(resetSummary?["availableCount"]).flatMap { $0 >= 0 ? $0 : nil },
             fetchedAt: now,
             earliestAvailableResetExpiry: earliestResetExpiry
         )
@@ -183,8 +180,8 @@ enum UsageSnapshotParser {
 
     private static func classify(_ duration: Int?) -> UsageWindowKind? {
         guard let duration else { return nil }
-        if fiveHourRange.contains(duration) { return .fiveHour }
-        if weeklyRange.contains(duration) { return .weekly }
+        if duration == 300 { return .fiveHour }
+        if duration == 10_080 { return .weekly }
         return nil
     }
 

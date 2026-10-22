@@ -3,15 +3,16 @@ import ServiceManagement
 
 /// Shared native settings grouping, with semantic colours for both appearances.
 final class SettingsGroupView: NSView {
+    private let descriptionLabel = NSTextField(wrappingLabelWithString: "")
     init(title: String, subtitle: String, controls: [NSView]) {
         super.init(frame: .zero)
         let heading = NSTextField(labelWithString: title)
         heading.font = .systemFont(ofSize: 13, weight: .semibold)
-        let description = NSTextField(wrappingLabelWithString: subtitle)
-        description.font = .systemFont(ofSize: 12); description.textColor = .secondaryLabelColor
+        descriptionLabel.stringValue = subtitle
+        descriptionLabel.font = .systemFont(ofSize: 12); descriptionLabel.textColor = .secondaryLabelColor
         let rows = NSStackView(views: controls)
         rows.orientation = .horizontal; rows.alignment = .centerY; rows.spacing = 28
-        let stack = NSStackView(views: [heading, description, rows])
+        let stack = NSStackView(views: [heading, descriptionLabel, rows])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 9
         stack.translatesAutoresizingMaskIntoConstraints = false; addSubview(stack)
         NSLayoutConstraint.activate([
@@ -19,10 +20,11 @@ final class SettingsGroupView: NSView {
             stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16),
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 18),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -18),
-            description.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            descriptionLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
     }
     required init?(coder: NSCoder) { nil }
+    func setSubtitle(_ text: String) { descriptionLabel.stringValue = text }
     override func draw(_ dirtyRect: NSRect) {
         let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 12, yRadius: 12)
         NSColor.controlBackgroundColor.setFill(); shape.fill()
@@ -64,6 +66,8 @@ private final class SettingsBackgroundView: NSView {
 final class GeneralSettingsController: NSViewController {
     private let preferences: Preferences
     private let loginItems: any LoginItemManaging
+    private var touchBarSupport: TouchBarSupport
+    private var appGroup: SettingsGroupView!
     private let touchBarToggle = NSButton(checkboxWithTitle: "显示 Touch Bar", target: nil, action: nil)
     private let login = NSButton(checkboxWithTitle: "登录时启动", target: nil, action: nil)
     private let refreshInterval = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -73,8 +77,8 @@ final class GeneralSettingsController: NSViewController {
     private let loginSettings = NSButton(title: "打开登录项设置…", target: nil, action: nil)
     private var observers: [NSObjectProtocol] = []
 
-    init(preferences: Preferences, loginItems: any LoginItemManaging) {
-        self.preferences = preferences; self.loginItems = loginItems
+    init(preferences: Preferences, loginItems: any LoginItemManaging, touchBarSupport: TouchBarSupport) {
+        self.preferences = preferences; self.loginItems = loginItems; self.touchBarSupport = touchBarSupport
         super.init(nibName: nil, bundle: nil)
         _ = view
         for name in [Preferences.didChange, Preferences.refreshDidChange] {
@@ -107,7 +111,7 @@ final class GeneralSettingsController: NSViewController {
         appSwitches.spacing = 28
         let appRows = NSStackView(views: [appSwitches, loginRows])
         appRows.orientation = .vertical; appRows.alignment = .leading; appRows.spacing = 8
-        let appGroup = SettingsGroupView(title: "应用", subtitle: "Touch Bar仅在ChatGPT前台显示；关闭按钮会同步显示开关。", controls: [appRows])
+        appGroup = SettingsGroupView(title: "应用", subtitle: touchBarSupport.settingsDescription, controls: [appRows])
 
         let events: [QuotaRefreshTrigger] = [.launch, .menuOpen, .foreground, .wake, .touchBar]
         let rows = NSStackView()
@@ -140,7 +144,14 @@ final class GeneralSettingsController: NSViewController {
         ])
         refresh()
     }
+    func updateTouchBarSupport(_ support: TouchBarSupport) {
+        touchBarSupport = support
+        refresh()
+    }
     func refresh() {
+        touchBarToggle.isHidden = !touchBarSupport.isUsable
+        refreshToggles[.touchBar]?.isHidden = !touchBarSupport.isUsable
+        appGroup.setSubtitle(touchBarSupport.settingsDescription)
         touchBarToggle.state = preferences.touchBarEnabled ? .on : .off
         let policy = preferences.refreshPolicy
         for (trigger, toggle) in refreshToggles { toggle.state = policy.allows(trigger) ? .on : .off }
@@ -203,7 +214,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     }
     private let general: GeneralSettingsController
     private let alerts: UsageAlertSettingsController
-    private let shortcuts: TouchBarSettingsController
+    private(set) var shortcuts: TouchBarSettingsController?
+    private let makeShortcuts: () -> TouchBarSettingsController
+    private var touchBarSupport: TouchBarSupport
+    private var availablePages: [Page] { touchBarSupport.isUsable ? Page.allCases : [.general, .alerts] }
     private let contentHost = NSView(frame: .zero)
     private let heading = NSTextField(labelWithString: "")
     private let subtitle = NSTextField(labelWithString: "")
@@ -211,10 +225,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     private var startedShortcutSession = false
 
     init(preferences: Preferences = .shared, service: any UsageNotificationManaging,
-         desktopActions: DesktopActions? = nil, loginItems: (any LoginItemManaging)? = nil) {
-        general = GeneralSettingsController(preferences: preferences, loginItems: loginItems ?? SystemLoginItemManager())
+         desktopActions: DesktopActions? = nil, loginItems: (any LoginItemManaging)? = nil,
+         touchBarSupport: TouchBarSupport) {
+        self.touchBarSupport = touchBarSupport
+        general = GeneralSettingsController(preferences: preferences, loginItems: loginItems ?? SystemLoginItemManager(),
+                                            touchBarSupport: touchBarSupport)
         alerts = UsageAlertSettingsController(preferences: preferences, service: service)
-        shortcuts = TouchBarSettingsController(preferences: preferences, desktopActions: desktopActions ?? DesktopActions())
+        makeShortcuts = { TouchBarSettingsController(preferences: preferences, desktopActions: desktopActions ?? DesktopActions()) }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 672, height: 585),
                               styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
         window.title = "CodexTouchBar 设置"; window.isReleasedWhenClosed = false
@@ -245,7 +262,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         select(page ?? selectedPage)
         NSApp.activate(ignoringOtherApps: true); window?.deminiaturize(nil); window?.makeKeyAndOrderFront(nil)
     }
-    func select(_ page: Page, readCatalog: Bool = true) {
+    func updateTouchBarSupport(_ support: TouchBarSupport) {
+        guard support != touchBarSupport else { return }
+        touchBarSupport = support
+        // Cancel a pending catalog read while preserving the current draft.
+        if !support.isUsable { shortcuts?.endSession() }
+        general.updateTouchBarSupport(support)
+        if let toolbar = window?.toolbar {
+            for index in toolbar.items.indices.reversed() { toolbar.removeItem(at: index) }
+            for (index, page) in availablePages.enumerated() { toolbar.insertItem(withItemIdentifier: page.identifier, at: index) }
+        }
+        select(selectedPage, readCatalog: false)
+    }
+    func select(_ requestedPage: Page, readCatalog: Bool = true) {
+        let page = availablePages.contains(requestedPage) ? requestedPage : .general
         window?.makeFirstResponder(nil)
         window?.defaultButtonCell = nil
         contentHost.subviews.forEach { $0.removeFromSuperview() }
@@ -257,6 +287,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         case .general: general.refresh(); child = general.view
         case .alerts: alerts.refresh(); child = alerts.view
         case .shortcuts:
+            if shortcuts == nil { shortcuts = makeShortcuts() }
+            guard let shortcuts else { return }
             if !startedShortcutSession { shortcuts.startSession(readCatalog: readCatalog); startedShortcutSession = true }
             child = shortcuts.view
         }
@@ -264,21 +296,21 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         contentHost.addSubview(child)
     }
     @objc private func selectToolbarPage(_ sender: NSToolbarItem) {
-        guard let page = Page.allCases.first(where: { $0.identifier == sender.itemIdentifier }) else { return }
+        guard let page = availablePages.first(where: { $0.identifier == sender.itemIdentifier }) else { return }
         select(page)
     }
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { Page.allCases.map(\.identifier) }
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { Page.allCases.map(\.identifier) }
-    func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { Page.allCases.map(\.identifier) }
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { availablePages.map(\.identifier) }
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { availablePages.map(\.identifier) }
+    func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { availablePages.map(\.identifier) }
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
-        guard let page = Page.allCases.first(where: { $0.identifier == identifier }) else { return nil }
+        guard let page = availablePages.first(where: { $0.identifier == identifier }) else { return nil }
         let item = NSToolbarItem(itemIdentifier: identifier)
         item.label = page.title; item.paletteLabel = page.title
         item.image = NSImage(systemSymbolName: page.symbol, accessibilityDescription: page.title)
         item.target = self; item.action = #selector(selectToolbarPage(_:))
         return item
     }
-    func windowWillClose(_ notification: Notification) { shortcuts.endSession(); startedShortcutSession = false }
+    func windowWillClose(_ notification: Notification) { shortcuts?.endSession(); startedShortcutSession = false }
     func windowDidBecomeKey(_ notification: Notification) {
         if selectedPage == .general { general.refresh() }
         if selectedPage == .alerts { alerts.refresh() }

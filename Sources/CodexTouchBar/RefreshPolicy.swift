@@ -21,6 +21,10 @@ enum QuotaRefreshTrigger: String, CaseIterable, Codable {
 struct QuotaRefreshPolicy: Codable, Equatable {
     static let intervals: [TimeInterval] = [30, 60, 120, 300, 600]
 
+    static func includesResetCreditDetails(explicit: Bool, panelVisible: Bool, expiryReminderEnabled: Bool) -> Bool {
+        explicit || panelVisible || expiryReminderEnabled
+    }
+
     static func intervalTitle(_ interval: TimeInterval) -> String {
         switch interval {
         case 30: return "30 秒"

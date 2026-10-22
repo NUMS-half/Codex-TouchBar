@@ -4,7 +4,7 @@
 
 ## 构建
 
-项目使用Swift Package Manager和AppKit，要求macOS 14或更高版本，没有第三方包依赖。
+项目使用Swift Package Manager和AppKit，仅支持Apple Silicon（arm64）、macOS 14或更高版本，没有第三方包依赖。
 
 ```bash
 ./tools/setup-local-signing.sh  # 首次配置本机签名身份
@@ -12,7 +12,7 @@
 ./install.sh                   # 构建、安装到~/Applications并启动
 ```
 
-安装脚本只替换本工具，并检查应用标识和签名身份。当前发布压缩包面向arm64，其他架构的使用情况尚未验证。
+安装脚本只替换本工具，并检查应用标识和签名身份。构建与发布目标为arm64，不安排Intel兼容或Universal安装包。
 
 ## 固定签名
 
@@ -41,6 +41,15 @@ build/CodexTouchBar.app/Contents/MacOS/CodexTouchBar --monitoring-ui-self-test
 - 设置与监控界面自检使用隔离偏好、临时数据库和通知／登录项替身，不修改用户真实设置。
 - `check-signing.sh`确认更新后的代码满足旧版签名身份，并拒绝被篡改的程序或同标识的临时签名程序。
 - Command Line Tools环境可能只构建XCTest目标；请以实际执行的自检结果为准。
+
+### 无 Touch Bar 模式
+
+- `TouchBarSystem.detect()`只读查询动态解析的`DFRGetStatus`，状态0/2表示未检测到实体硬件，1/3表示存在，符号缺失或其他值表示未知。这是私有接口约定，需在真实硬件与支持的系统上验收。检测不调用`DFRSetStatus`。
+- `TouchBarSupport`分别表示硬件与呈现能力；`TouchBarSession`只有在硬件已确认、接口可用、用户开启且需要显示时才创建控制器。无硬件时额度读取、历史、提醒和菜单栏不经过硬件路径。
+- 启动、唤醒和打开设置重新检测；检测结果不持久化，也不改写Touch Bar偏好。设置页根据同一支持状态隐藏专属入口，编辑器按需创建。
+- `--self-test`覆盖状态转换、接口存在但无硬件、控制器惰性创建与恢复。`--settings-self-test`用假的呈现接口验证清理、计时器及动态设置页；`--monitoring-ui-self-test`比较三种硬件状态下的额度查询、历史、提醒和菜单栏值。
+- 保存浅／深色设置预览：`build/CodexTouchBar.app/Contents/MacOS/CodexTouchBar --settings-self-test --settings-preview build/hardware-previews/shortcuts.png`。这些自检不呈现实物Touch Bar、不请求辅助功能权限、不发送真实通知。
+- 硬件真机验收需分别覆盖无Touch Bar和有Touch Bar的Apple Silicon Mac；模拟状态只验证代码分支。实施记录见[无Touch Bar适配审查](reviews/2026-10-23-non-touchbar-support.md)。
 
 真实通知验收需先在设置中开启提醒并允许系统通知，再显式运行：
 

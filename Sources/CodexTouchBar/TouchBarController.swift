@@ -1,51 +1,9 @@
 import AppKit
-import ObjectiveC
 
 private extension NSTouchBarItem.Identifier {
     static let codexUsage = NSTouchBarItem.Identifier("com.wyx.CodexTouchBar.usage")
     static let codexClose = NSTouchBarItem.Identifier("com.wyx.CodexTouchBar.close")
     static let codexFallback = NSTouchBarItem.Identifier("com.wyx.CodexTouchBar.fallback")
-}
-
-/// Isolates undocumented APIs behind runtime checks. A failure here must never
-/// affect the app's menu-bar functionality.
-private enum SystemModalTouchBar {
-    /// `0` is the coexistence placement: the modal content uses the app-control
-    /// area while macOS keeps the Control Strip (brightness, volume, Siri, …)
-    /// on the right. `1` replaces the entire Touch Bar, which is appropriate
-    /// for a temporary full-screen mode but not for a persistent usage readout.
-    private static let coexistencePlacement = 0
-
-    private static let presentSelector = NSSelectorFromString(
-        "presentSystemModalTouchBar:placement:systemTrayItemIdentifier:"
-    )
-    private static let dismissSelector = NSSelectorFromString("dismissSystemModalTouchBar:")
-
-    static var isAvailable: Bool {
-        class_getClassMethod(NSTouchBar.self, presentSelector) != nil
-            && class_getClassMethod(NSTouchBar.self, dismissSelector) != nil
-    }
-
-    static func present(_ touchBar: NSTouchBar) -> Bool {
-        guard let method = class_getClassMethod(NSTouchBar.self, presentSelector) else { return false }
-        typealias PresentFunction = @convention(c) (AnyObject, Selector, NSTouchBar, Int, NSString) -> Void
-        let function = unsafeBitCast(method_getImplementation(method), to: PresentFunction.self)
-        function(
-            NSTouchBar.self,
-            presentSelector,
-            touchBar,
-            coexistencePlacement,
-            "com.wyx.CodexTouchBar.system-modal" as NSString
-        )
-        return true
-    }
-
-    static func dismiss(_ touchBar: NSTouchBar) {
-        guard let method = class_getClassMethod(NSTouchBar.self, dismissSelector) else { return }
-        typealias DismissFunction = @convention(c) (AnyObject, Selector, NSTouchBar) -> Void
-        let function = unsafeBitCast(method_getImplementation(method), to: DismissFunction.self)
-        function(NSTouchBar.self, dismissSelector, touchBar)
-    }
 }
 
 private final class TouchBarQuotaCard: NSButton {
@@ -102,7 +60,7 @@ private final class TouchBarQuotaCard: NSButton {
                 .font: NSFont.monospacedDigitSystemFont(ofSize: 15, weight: .bold),
                 .foregroundColor: NSColor.tertiaryLabelColor,
             ]
-            ("N/A" as NSString).draw(at: NSPoint(x: card.minX + 31, y: card.maxY - 18), withAttributes: unavailableAttributes)
+            ("—" as NSString).draw(at: NSPoint(x: card.minX + 31, y: card.maxY - 18), withAttributes: unavailableAttributes)
             drawSecondary("暂无额度", in: card)
             drawProgress(ratio: 0, color: .tertiaryLabelColor, in: card)
             return
@@ -420,7 +378,8 @@ private final class FallbackReadoutView: NSView {
     }
 }
 
-final class TouchBarController: NSObject, NSTouchBarDelegate {
+final class TouchBarController: NSObject, NSTouchBarDelegate, TouchBarPresenting {
+    private let presentation: TouchBarPresentationAccess
     private let touchBar = NSTouchBar()
     private let usageView: TouchBarUsageView
     private let closeButton = TouchBarCloseButton(frame: .zero)
@@ -430,12 +389,16 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
     private var systemModalVisible = false
     private var shouldBeVisible = false
     private var countdownTimer: Timer?
+    var isRunningCountdown: Bool { countdownTimer != nil }
 
     var onRefresh: (() -> Void)?
     var onClose: (() -> Void)?
     var onAction: ((DesktopCommand) -> Void)?
 
-    override init() {
+    override convenience init() { self.init(presentation: .system) }
+
+    init(presentation: TouchBarPresentationAccess) {
+        self.presentation = presentation
         usageView = TouchBarUsageView(frame: .zero)
         super.init()
         usageView.onRefresh = { [weak self] in self?.onRefresh?() }
@@ -449,11 +412,12 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
 
     deinit {
         countdownTimer?.invalidate()
-        if systemModalVisible { SystemModalTouchBar.dismiss(touchBar) }
-        unregisterFallback()
+        if systemModalVisible { presentation.dismiss(touchBar) }
+        if fallbackRegistered, let fallbackItem {
+            presentation.setPresence(NSTouchBarItem.Identifier.codexFallback.rawValue, false)
+            presentation.unregister(fallbackItem)
+        }
     }
-
-    var supportsFullPresentation: Bool { SystemModalTouchBar.isAvailable }
 
     func touchBar(_ touchBar: NSTouchBar, makeItemForIdentifier identifier: NSTouchBarItem.Identifier) -> NSTouchBarItem? {
         switch identifier {
@@ -488,36 +452,38 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
     }
 
     func setVisible(_ visible: Bool) {
+        guard shouldBeVisible != visible else { return }
         shouldBeVisible = visible
         guard visible else {
             countdownTimer?.invalidate()
             countdownTimer = nil
             usageView.restoreDefaultLayout()
             if systemModalVisible {
-                SystemModalTouchBar.dismiss(touchBar)
+                presentation.dismiss(touchBar)
                 systemModalVisible = false
             }
-            setFallbackVisible(false)
+            unregisterFallback()
             return
         }
 
+        if !systemModalVisible, presentation.present(touchBar) {
+            systemModalVisible = true
+            unregisterFallback()
+        } else if !systemModalVisible {
+            setFallbackVisible(true)
+        }
+        guard systemModalVisible || fallbackRegistered else { shouldBeVisible = false; return }
         if countdownTimer == nil {
             countdownTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
                 self?.usageView.refreshCountdown()
             }
         }
-
-        if SystemModalTouchBar.isAvailable, !systemModalVisible, SystemModalTouchBar.present(touchBar) {
-            systemModalVisible = true
-            setFallbackVisible(false)
-        } else if !systemModalVisible {
-            setFallbackVisible(true)
-        }
     }
 
     private func setFallbackVisible(_ visible: Bool) {
         if visible { registerFallbackIfNeeded() }
-        Self.setControlStripPresence(NSTouchBarItem.Identifier.codexFallback.rawValue, visible)
+        guard fallbackRegistered else { return }
+        presentation.setPresence(NSTouchBarItem.Identifier.codexFallback.rawValue, visible)
     }
 
     private func registerFallbackIfNeeded() {
@@ -525,42 +491,17 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
         let item = NSCustomTouchBarItem(identifier: .codexFallback)
         item.view = fallbackView
         item.customizationLabel = "Codex 额度"
+        guard presentation.register(item) else { return }
         fallbackItem = item
         fallbackRegistered = true
-        Self.addSystemTrayItem(item)
     }
 
     private func unregisterFallback() {
         guard fallbackRegistered else { return }
-        if let fallbackItem { Self.removeSystemTrayItem(fallbackItem) }
+        presentation.setPresence(NSTouchBarItem.Identifier.codexFallback.rawValue, false)
+        if let fallbackItem { presentation.unregister(fallbackItem) }
         fallbackRegistered = false
         fallbackItem = nil
     }
 
-    private static let dfrHandle = dlopen(
-        "/System/Library/PrivateFrameworks/DFRFoundation.framework/DFRFoundation",
-        RTLD_NOW
-    )
-    private typealias DFRPresenceFunction = @convention(c) (CFString, ObjCBool) -> Void
-    private static let dfrSetPresence: DFRPresenceFunction? = {
-        guard let dfrHandle,
-              let symbol = dlsym(dfrHandle, "DFRElementSetControlStripPresenceForIdentifier") else { return nil }
-        return unsafeBitCast(symbol, to: DFRPresenceFunction.self)
-    }()
-
-    private static func setControlStripPresence(_ identifier: String, _ visible: Bool) {
-        dfrSetPresence?(identifier as CFString, ObjCBool(visible))
-    }
-
-    private static func addSystemTrayItem(_ item: NSCustomTouchBarItem) {
-        let selector = NSSelectorFromString("addSystemTrayItem:")
-        guard (NSTouchBarItem.self as AnyObject).responds(to: selector) else { return }
-        _ = (NSTouchBarItem.self as AnyObject).perform(selector, with: item)
-    }
-
-    private static func removeSystemTrayItem(_ item: NSCustomTouchBarItem) {
-        let selector = NSSelectorFromString("removeSystemTrayItem:")
-        guard (NSTouchBarItem.self as AnyObject).responds(to: selector) else { return }
-        _ = (NSTouchBarItem.self as AnyObject).perform(selector, with: item)
-    }
 }

@@ -14,6 +14,10 @@ enum ButtonSettingsDiagnostics {
             do { try FileManager.default.createDirectory(at: URL(fileURLWithPath: previewPath).deletingLastPathComponent(), withIntermediateDirectories: true) }
             catch { print("Settings preview directory failed: \(error)"); return false }
         }
+        do {
+            try TouchBarSupportUIDiagnostics.presentation()
+            try TouchBarSupportUIDiagnostics.settings(folder: previewPath.map { URL(fileURLWithPath: $0).deletingLastPathComponent() })
+        } catch { print("Touch Bar support UI self-test failed: \(error)"); return false }
         guard checkExpandedTouchBar(previewPath: previewPath),
               checkPanelAndMenuBar(previewPath: previewPath),
               UnifiedSettingsDiagnostics.run(folder: previewPath.map { URL(fileURLWithPath: $0).deletingLastPathComponent() }) else { return false }

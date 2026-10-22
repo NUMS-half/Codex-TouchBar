@@ -13,9 +13,12 @@ private final class PlanTagView: NSView {
         label.translatesAutoresizingMaskIntoConstraints = false
         label.font = .systemFont(ofSize: 11, weight: .semibold)
         label.alignment = .center
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         addSubview(label)
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: 22),
+            widthAnchor.constraint(lessThanOrEqualToConstant: 130),
             label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 9),
             label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -28,7 +31,7 @@ private final class PlanTagView: NSView {
     override var intrinsicContentSize: NSSize {
         guard !displayedText.isEmpty else { return .zero }
         let width = (displayedText as NSString).size(withAttributes: [.font: label.font!]).width
-        return NSSize(width: ceil(width) + 18, height: 22)
+        return NSSize(width: min(ceil(width) + 18, 130), height: 22)
     }
 
     func update(planType: String?, limitName: String?) {
@@ -43,20 +46,15 @@ private final class PlanTagView: NSView {
         displayedText = uniqueParts.joined(separator: " · ")
         isHidden = displayedText.isEmpty
         label.stringValue = displayedText
+        let details = [planType.map { "套餐类型：\($0)" }, limitName.map { "额度池：\($0)" }]
+            .compactMap { $0 }.joined(separator: "\n")
+        toolTip = details.isEmpty ? nil : details
+        label.toolTip = toolTip
 
         let colour = tagColor(for: displayedText)
         label.textColor = colour
         layer?.backgroundColor = colour.withAlphaComponent(0.16).cgColor
         invalidateIntrinsicContentSize()
-    }
-
-    private func displayPlanName(_ value: String) -> String {
-        let words = value.split(separator: " ", omittingEmptySubsequences: true)
-        guard let first = words.first else { return value }
-
-        let canonicalNames = ["plus": "Plus", "free": "Free", "pro": "Pro"]
-        guard let canonical = canonicalNames[String(first).lowercased()] else { return value }
-        return ([canonical] + words.dropFirst().map(String.init)).joined(separator: " ")
     }
 
     private func tagColor(for text: String) -> NSColor {
@@ -334,11 +332,11 @@ final class PanelController: NSObject, NSPopoverDelegate {
     func update(snapshot: UsageSnapshot?, freshness: SnapshotFreshness, error: String?, isRefreshing: Bool,
                 recentChanges: [UsageWindowKind: UsageRecentChange] = [:], now: Date = Date()) {
         let old = freshness.isStale || snapshot.map { now < $0.fetchedAt || now.timeIntervalSince($0.fetchedAt) > 900 } == true
-        fiveHourCard.update(snapshot?.fiveHour, change: recentChanges[.fiveHour], isStale: old, now: now)
-        weeklyCard.update(snapshot?.weekly, change: recentChanges[.weekly], isStale: old, now: now)
+        fiveHourCard.update(snapshot?.fiveHour, hasSnapshot: snapshot != nil, change: recentChanges[.fiveHour], isStale: old, now: now)
+        weeklyCard.update(snapshot?.weekly, hasSnapshot: snapshot != nil, change: recentChanges[.weekly], isStale: old, now: now)
         planTag.update(planType: snapshot?.planType, limitName: snapshot?.limitName)
         creditLabel.stringValue = creditText(snapshot)
-        resetLabel.stringValue = snapshot.map { "可用重置：\($0.availableResetCredits) 次" } ?? "可用重置：—"
+        resetLabel.stringValue = snapshot?.availableResetCredits.map { "可用重置：\($0) 次" } ?? "可用重置：—"
         let expiry = snapshot?.earliestAvailableResetExpiry.flatMap { $0 > Date() ? $0 : nil }
         resetExpiryLabel.stringValue = expiry.map(resetExpiryText) ?? ""
         resetExpiryLabel.isHidden = expiry == nil

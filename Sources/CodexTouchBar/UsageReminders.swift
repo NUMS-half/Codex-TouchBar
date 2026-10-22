@@ -11,7 +11,7 @@ struct UsageReminderEngine: Codable {
 
     mutating func consume(_ snapshot: UsageSnapshot, now: Date) -> [UsageAlertEvent] {
         guard now >= snapshot.fetchedAt, now.timeIntervalSince(snapshot.fetchedAt) <= 900,
-              expiryEnabled, snapshot.availableResetCredits > 0,
+              expiryEnabled, let count = snapshot.availableResetCredits, count > 0,
               let expiry = snapshot.earliestAvailableResetExpiry,
               expiry > now, expiry.timeIntervalSince(now) <= 86_400, expiry != notifiedExpiry else { return [] }
         return [.init(kind: .weekly, remaining: snapshot.weekly?.remainingPercent ?? 0,

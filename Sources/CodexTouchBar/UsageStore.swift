@@ -42,10 +42,7 @@ final class UsageStore {
             guard let self else { return }
             do {
                 let value = try await provider.fetch(includeResetCreditDetails: includeResetCreditDetails)
-                self.snapshot = self.applyingResetExpiryPolicy(
-                    to: value,
-                    includeResetCreditDetails: includeResetCreditDetails
-                )
+                self.snapshot = value
                 self.freshness = .live
                 self.errorMessage = nil
                 if let snapshot = self.snapshot { self.cache.save(snapshot) }
@@ -67,30 +64,6 @@ final class UsageStore {
                 self.notify()
             }
         }
-    }
-
-    private func applyingResetExpiryPolicy(
-        to value: UsageSnapshot,
-        includeResetCreditDetails: Bool
-    ) -> UsageSnapshot {
-        guard !includeResetCreditDetails,
-              let previous = snapshot,
-              previous.availableResetCredits == value.availableResetCredits,
-              let expiry = previous.earliestAvailableResetExpiry,
-              expiry > Date() else {
-            return value
-        }
-        return UsageSnapshot(
-            fiveHour: value.fiveHour,
-            weekly: value.weekly,
-            planType: value.planType,
-            limitName: value.limitName,
-            creditBalance: value.creditBalance,
-            unlimitedCredits: value.unlimitedCredits,
-            availableResetCredits: value.availableResetCredits,
-            fetchedAt: value.fetchedAt,
-            earliestAvailableResetExpiry: expiry
-        )
     }
 
     private func notify() {

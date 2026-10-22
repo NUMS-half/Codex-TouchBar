@@ -157,6 +157,7 @@ final class UsageMonitoringController {
 
     func consume(_ snapshot: UsageSnapshot) {
         let observations = UsageObservation.from(snapshot)
+        engine.resetMissingWindows(in: observations)
         var events = engine.consume(observations)
         let candidates = reminders.consume(snapshot, now: Date())
         let reminderEvents = reminderDelivery == nil ? candidates : []

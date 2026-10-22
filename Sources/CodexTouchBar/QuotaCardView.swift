@@ -112,13 +112,15 @@ final class QuotaCardView: NSView {
         }
     }
 
-    func update(_ window: UsageWindow?, change: UsageRecentChange? = nil, isStale: Bool = false, now: Date = Date()) {
+    func update(_ window: UsageWindow?, hasSnapshot: Bool = false, change: UsageRecentChange? = nil, isStale: Bool = false, now: Date = Date()) {
         guard let window else {
-            remainingLabel.stringValue = "N/A"
+            remainingLabel.stringValue = "—"
             remainingLabel.textColor = .tertiaryLabelColor
-            remainingCaption.stringValue = "当前方案未提供"
+            remainingCaption.stringValue = hasSnapshot ? "未提供此窗口数据" : "尚未读取额度"
             changeLabel.stringValue = "暂无额度记录"
+            changeLabel.toolTip = nil
             resetLabel.stringValue = ""
+            resetLabel.toolTip = nil
             progress.update(value: 0, tint: .tertiaryLabelColor)
             return
         }

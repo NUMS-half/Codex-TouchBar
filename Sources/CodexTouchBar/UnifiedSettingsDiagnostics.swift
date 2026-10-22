@@ -21,7 +21,8 @@ enum UnifiedSettingsDiagnostics {
         let service = UsageMonitoringUIDiagnostics.FakeNotifications()
         service.status = .allowed
         let loginItems = LoginItems()
-        let controller = SettingsWindowController(preferences: preferences, service: service, loginItems: loginItems)
+        let controller = SettingsWindowController(preferences: preferences, service: service, loginItems: loginItems,
+                                                  touchBarSupport: .init(hardware: .present, fullPresentation: true))
         let check = UsageMonitoringDiagnostics.check
         do {
             let window = controller.window!

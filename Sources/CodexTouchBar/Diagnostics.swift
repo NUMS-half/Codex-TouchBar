@@ -5,6 +5,8 @@ enum SelfTest {
         guard AppMenuChecks.run() else { return false }
         guard AppServerResponseChecks.run() else { return false }
         guard RefreshPolicyChecks.run() else { return false }
+        guard TouchBarSupportChecks.run() else { return false }
+        guard PlanCompatibilityDiagnostics.run() else { return false }
         guard UsageMonitoringDiagnostics.run() else { return false }
         guard DesktopKeybindingChecks.run() else { return false }
         guard TouchBarConfigurationChecks.run() else { return false }

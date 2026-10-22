@@ -113,6 +113,8 @@ enum PanelMotionDiagnostics {
             panel.show(relativeTo: button.bounds, of: button)
             try await Task.sleep(for: .milliseconds(350))
             try check(panel.isShown && panel.navigation?.page == .overview && panel.navigation?.view.bounds.size == compact, "reopening restores compact overview")
+            try await PlanCompatibilityUIDiagnostics.nativePopover(panel, folder: folder)
+            panel.update(snapshot: snapshot, freshness: .live, error: nil, isRefreshing: false, recentChanges: changes)
             if CommandLine.arguments.contains("--panel-motion-preview") {
                 panel.showHistory(); await panel.waitForHistoryRead()
                 print("Preview ready (isolated example data).")

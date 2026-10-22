@@ -4,13 +4,14 @@ import ServiceManagement
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = UsageStore()
-    private let touchBar = TouchBarController()
+    private let touchBar = TouchBarSession()
+    private var touchBarSupport = TouchBarSupport(hardware: .unknown)
     private let desktopActions = DesktopActions()
     private let panel = PanelController()
     private let appMenu = AppMenuController()
     private let usageNotifications = UsageNotificationService()
     private lazy var usageMonitoring = UsageMonitoringController(sender: usageNotifications)
-    private lazy var settingsWindow = SettingsWindowController(service: usageNotifications, desktopActions: desktopActions)
+    private var settingsWindow: SettingsWindowController?
     private var statusItem: NSStatusItem!
     private let statusReadout = StatusUsageReadoutView()
     private let refreshTimer = QuotaRefreshTimer()
@@ -19,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         configureStatusItem()
         configureCallbacks()
+        refreshTouchBarSupport()
         store.onSuccessfulRefresh = { [weak self] in self?.usageMonitoring.consume($0) }
         usageMonitoring.onChange = { [weak self] in self?.panel.reloadHistory(); self?.pushState() }
         usageNotifications.onOpenHistory = { [weak self] kind in
@@ -47,7 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         refreshTimer.stop()
-        touchBar.setVisible(false)
+        touchBar.stop()
     }
 
     private func configureCallbacks() {
@@ -62,14 +64,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appMenu.onSettings = { [weak self] in self?.showSettings() }
         appMenu.onQuit = { [weak self] in self?.quit() }
         panel.onDisplayTick = { [weak self] in self?.pushState() }
-        touchBar.onRefresh = { [weak self] in
-            guard let self else { return }
-            if !self.requestRefresh(.touchBar) { self.touchBar.showFeedback("Touch Bar刷新已关闭，可在通用设置中开启") }
-        }
-        touchBar.onClose = { Preferences.shared.touchBarEnabled = false }
-        touchBar.onAction = { [weak self] command in
-            self?.performDesktopAction { try self?.desktopActions.perform(command) }
-        }
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(preferencesChanged),
@@ -131,12 +125,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func refreshPreferencesChanged() { restartTimer() }
 
     @objc private func preferencesChanged() {
-        updateTouchBarVisibility()
         pushState()
     }
 
     @objc private func buttonsChanged() {
-        touchBar.applyConfiguration(Preferences.shared.touchBarConfiguration)
+        touchBar.controller?.applyConfiguration(Preferences.shared.touchBarConfiguration)
     }
 
     @objc private func alertsChanged() { usageMonitoring.configure() }
@@ -148,7 +141,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     @objc private func showSettings() {
         panel.close()
-        settingsWindow.show()
+        refreshTouchBarSupport()
+        if settingsWindow == nil {
+            settingsWindow = SettingsWindowController(service: usageNotifications, desktopActions: desktopActions,
+                                                      touchBarSupport: touchBarSupport)
+        }
+        settingsWindow?.show()
     }
 
     @objc private func frontmostApplicationChanged(_ notification: Notification) {
@@ -160,12 +158,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func systemWillSleep(_ notification: Notification) {
         isSleeping = true
         refreshTimer.stop()
-        touchBar.setVisible(false)
+        touchBar.controller?.setVisible(false)
     }
 
     @objc private func systemDidWake(_ notification: Notification) {
         isSleeping = false
-        updateTouchBarVisibility()
+        refreshTouchBarSupport()
         restartTimer()
         requestRefresh(.wake)
     }
@@ -174,17 +172,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.frontmostApplication?.bundleIdentifier == ApplicationIdentity.chatGPTBundleIdentifier
     }
 
+    private func refreshTouchBarSupport() {
+        touchBarSupport = TouchBarSystem.detect()
+        settingsWindow?.updateTouchBarSupport(touchBarSupport)
+        updateTouchBarVisibility()
+    }
+
     private func updateTouchBarVisibility() {
-        let visible = Preferences.shared.touchBarEnabled
-            && !isSleeping && isCodexFrontmost
-        touchBar.setVisible(visible)
+        touchBar.synchronize(support: touchBarSupport, enabled: Preferences.shared.touchBarEnabled,
+                             visible: !isSleeping && isCodexFrontmost) { [self] in
+            let controller = TouchBarController()
+            controller.onRefresh = { [weak self] in
+                guard let self else { return }
+                if !self.requestRefresh(.touchBar) {
+                    self.touchBar.controller?.showFeedback("Touch Bar刷新已关闭，可在通用设置中开启")
+                }
+            }
+            controller.onClose = { Preferences.shared.touchBarEnabled = false }
+            controller.onAction = { [weak self] command in
+                self?.performDesktopAction { try self?.desktopActions.perform(command) }
+            }
+            controller.applyConfiguration(Preferences.shared.touchBarConfiguration)
+            controller.update(snapshot: store.snapshot, freshness: store.freshness, isRefreshing: store.isRefreshing)
+            return controller
+        }
     }
 
     @discardableResult
     private func requestRefresh(_ trigger: QuotaRefreshTrigger, includeResetCreditDetails: Bool = false) -> Bool {
         guard !isSleeping else { return false }
         return Preferences.shared.refreshPolicy.perform(trigger) {
-            store.refresh(includeResetCreditDetails: includeResetCreditDetails || Preferences.shared.usageAlertOptions.resetExpiry)
+            store.refresh(includeResetCreditDetails: QuotaRefreshPolicy.includesResetCreditDetails(
+                explicit: includeResetCreditDetails,
+                panelVisible: panel.isShown,
+                expiryReminderEnabled: Preferences.shared.usageAlertOptions.resetExpiry
+            ))
         }
     }
 
@@ -219,7 +241,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try action()
         } catch {
-            touchBar.showFeedback(error.localizedDescription)
+            touchBar.controller?.showFeedback(error.localizedDescription)
         }
     }
 
@@ -232,7 +254,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             isRefreshing: store.isRefreshing,
             recentChanges: usageMonitoring.recentChangesAt == snapshot?.fetchedAt ? usageMonitoring.recentChanges : [:]
         )
-        touchBar.update(snapshot: snapshot, freshness: store.freshness, isRefreshing: store.isRefreshing)
+        touchBar.controller?.update(snapshot: snapshot, freshness: store.freshness, isRefreshing: store.isRefreshing)
         updateTouchBarVisibility()
 
         statusReadout.update(fiveHour: snapshot?.fiveHour, weekly: snapshot?.weekly)
