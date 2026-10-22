@@ -42,6 +42,15 @@ build/CodexTouchBar.app/Contents/MacOS/CodexTouchBar --monitoring-ui-self-test
 - `check-signing.sh`确认更新后的代码满足旧版签名身份，并拒绝被篡改的程序或同标识的临时签名程序。
 - Command Line Tools环境可能只构建XCTest目标；请以实际执行的自检结果为准。
 
+原生菜单面板检查需要可交互的桌面。通过macOS正常启动路径运行时，应显式指定输出目录，避免启动工作目录为`/`时写入失败：
+
+```bash
+open -n -W --stdout "$PWD/build/panel-motion.log" --stderr "$PWD/build/panel-motion.stderr.log" \
+  build/CodexTouchBar.app --args --panel-motion-self-test --panel-motion-output "$PWD/build/panel-motion"
+```
+
+检查结束后读取日志中的`Real menu panel motion self-test passed`；`open`退出码本身不代表应用自检通过。测试期间会显示使用隔离示例数据的原生弹出面板，点击其他窗口会关闭临时面板并使检查失败。
+
 ### 无 Touch Bar 模式
 
 - `TouchBarSystem.detect()`只读查询动态解析的`DFRGetStatus`，状态0/2表示未检测到实体硬件，1/3表示存在，符号缺失或其他值表示未知。这是私有接口约定，需在真实硬件与支持的系统上验收。检测不调用`DFRSetStatus`。

@@ -29,7 +29,10 @@ if CommandLine.arguments.contains("--panel-motion-self-test") {
     MainActor.assumeIsolated {
         NSApplication.shared.setActivationPolicy(.accessory)
         Task { @MainActor in
-            let folder = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("build/panel-motion")
+            let outputIndex = CommandLine.arguments.firstIndex(of: "--panel-motion-output")
+            let outputPath = outputIndex.flatMap { CommandLine.arguments.indices.contains($0 + 1) ? CommandLine.arguments[$0 + 1] : nil }
+            let folder = outputPath.map { URL(fileURLWithPath: $0) }
+                ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("build/panel-motion")
             exit(await PanelMotionDiagnostics.run(folder: folder) ? 0 : 1)
         }
         NSApplication.shared.run()
