@@ -81,7 +81,6 @@ final class QuotaCardView: NSView {
         progress.translatesAutoresizingMaskIntoConstraints = false
         [titleLabel, remainingLabel, remainingCaption, resetLabel, progress, changeLabel].forEach(addSubview)
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 116),
             titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 12),
             titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             remainingLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 2),
@@ -92,6 +91,7 @@ final class QuotaCardView: NSView {
             resetLabel.firstBaselineAnchor.constraint(equalTo: titleLabel.firstBaselineAnchor),
             progress.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             progress.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            progress.topAnchor.constraint(equalTo: remainingLabel.bottomAnchor, constant: 8),
             progress.bottomAnchor.constraint(equalTo: changeLabel.topAnchor, constant: -8),
             progress.heightAnchor.constraint(equalToConstant: 6),
             changeLabel.leadingAnchor.constraint(equalTo: progress.leadingAnchor),

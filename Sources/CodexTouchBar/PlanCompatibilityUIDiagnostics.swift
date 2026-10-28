@@ -11,11 +11,47 @@ enum PlanCompatibilityUIDiagnostics {
             return try replies.removeFirst().get()
         }
     }
+    actor ResetDetailProvider: UsageProvider {
+        private let now: Date
+        private(set) var requests: [Bool] = []
+        init(now: Date) { self.now = now }
+        func fetch(includeResetCreditDetails: Bool) async throws -> UsageSnapshot {
+            requests.append(includeResetCreditDetails)
+            let expiry: Date? = requests.count == 3 || !includeResetCreditDetails ? nil : now.addingTimeInterval(Double(requests.count) * 3_600)
+            return PlanCompatibilityDiagnostics.snapshot(plan: "plus", time: now, count: 2, expiry: expiry)
+        }
+    }
 
     static func run(folder: URL) async throws {
+        try await automaticResetDetails()
         try views(folder: folder)
         try await refreshPipeline()
         print("Plan compatibility UI self-test passed (family tooltips, long names, missing windows, reset details, failed reads, real alert pipeline)")
+    }
+
+    private static func automaticResetDetails() async throws {
+        let check = UsageMonitoringDiagnostics.check
+        let now = Date()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("reset-details-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let provider = ResetDetailProvider(now: now)
+        let store = UsageStore(provider: provider, cache: UsageCache(fileURL: root.appendingPathComponent("usage.json")))
+        var policy = QuotaRefreshPolicy()
+        policy.setEnabled(false, for: .menuOpen)
+        var prohibitedCalls = 0
+        try check(!policy.perform(.menuOpen, operation: { prohibitedCalls += 1 }) && prohibitedCalls == 0,
+                  "disabled menu-open refresh never starts a request")
+        for (index, trigger) in [QuotaRefreshTrigger.launch, .foregroundTimer, .backgroundTimer].enumerated() {
+            await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+                store.onChange = { if !store.isRefreshing { store.onChange = nil; done.resume() } }
+                _ = policy.perform(trigger) { store.refresh() }
+            }
+            let expected: Date? = index == 2 ? nil : now.addingTimeInterval(Double(index + 1) * 3_600)
+            try check(store.snapshot?.earliestAvailableResetExpiry == expected,
+                      "regular refresh uses its own reset expiry and never reuses stale details")
+        }
+        let requests = await provider.requests
+        try check(requests == [true, true, true], "each permitted refresh requests details in one fetch")
     }
 
     static func nativePopover(_ panel: PanelController, folder: URL) async throws {
@@ -59,6 +95,7 @@ enum PlanCompatibilityUIDiagnostics {
             ("five-only", PlanCompatibilityDiagnostics.snapshot(plan: "go", weekly: nil, time: now, count: 0)),
             ("empty", PlanCompatibilityDiagnostics.snapshot(five: nil, weekly: nil, time: now)),
             ("pro", PlanCompatibilityDiagnostics.snapshot(plan: "prolite", time: now, count: 2)),
+            ("reset-expiry", PlanCompatibilityDiagnostics.snapshot(plan: "plus", time: now, count: 2, expiry: now.addingTimeInterval(86_400))),
             ("unknown", PlanCompatibilityDiagnostics.snapshot(plan: longName, time: now)),
         ]
         for appearance in [NSAppearance.Name.aqua, .darkAqua] {
@@ -71,6 +108,16 @@ enum PlanCompatibilityUIDiagnostics {
                 try check(size.width == 340 && size.height < 470, "all plan states retain the compact panel")
                 let labels = UIDiagnosticSupport.descendants(content).compactMap { $0 as? NSTextField }
                 let texts = labels.map(\.stringValue)
+                if name == "reset-expiry" {
+                    guard let expiry = labels.first(where: { $0.stringValue.hasPrefix("最近到期 ") }) else {
+                        throw UsageMonitoringDiagnostics.CheckFailure(message: "future reset expiry label missing from panel hierarchy")
+                    }
+                    let frame = content.convert(expiry.alignmentRect(forFrame: expiry.frame), from: expiry.superview)
+                    print("Reset expiry label: hidden=\(expiry.isHiddenOrHasHiddenAncestor), frame=\(frame), intrinsic=\(expiry.intrinsicContentSize)")
+                    try check(!expiry.isHiddenOrHasHiddenAncestor && content.bounds.contains(frame)
+                              && frame.width >= expiry.intrinsicContentSize.width - 1,
+                              "future reset expiry is fully visible alongside reset count")
+                }
                 let cards = UIDiagnosticSupport.descendants(content).compactMap { $0 as? QuotaCardView }
                 let cardTexts = cards.flatMap { UIDiagnosticSupport.descendants($0).compactMap { ($0 as? NSTextField)?.stringValue } }
                 let missing = [value?.fiveHour, value?.weekly].filter { $0 == nil }.count

@@ -6,6 +6,7 @@ final class Preferences {
     static let buttonsDidChange = Notification.Name("CodexTouchBar.ButtonsDidChange")
     static let refreshDidChange = Notification.Name("CodexTouchBar.RefreshDidChange")
     static let alertsDidChange = Notification.Name("CodexTouchBar.AlertsDidChange")
+    static let sessionTPSDidChange = Notification.Name("CodexTouchBar.SessionTPSDidChange")
 
     private let defaults: UserDefaults
     private enum Key {
@@ -17,9 +18,28 @@ final class Preferences {
         static let alertOptions = "usageAlerts.options.v1"
         static let alertState = "usageAlerts.state.v1"
         static let reminderState = "usageReminders.state.v1"
+        static let menuBarTPS = "sessionTPS.menuBar.v1"
+        static let composerTPS = "sessionTPS.composer.v1"
+        static let panelTPS = "sessionTPS.panel.v2"
+        static let menuBarTPSCurrent = "sessionTPS.menuBar.v3"
     }
 
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+
+    var sessionTPSOptions: SessionTPSOptions {
+        get {
+            // Preserve the previous panel choice when moving its display back to the menu bar.
+            let menuBar = defaults.object(forKey: Key.menuBarTPSCurrent) as? Bool
+                ?? (defaults.object(forKey: Key.panelTPS) as? Bool)
+                ?? (defaults.bool(forKey: Key.menuBarTPS) || defaults.bool(forKey: Key.composerTPS))
+            return .init(menuBar: menuBar, touchBar: touchBarConfiguration.slots.contains { $0.action == .sessionTPS })
+        }
+        set {
+            guard newValue != sessionTPSOptions else { return }
+            defaults.set(newValue.menuBar, forKey: Key.menuBarTPSCurrent)
+            NotificationCenter.default.post(name: Self.sessionTPSDidChange, object: self)
+        }
+    }
 
     var usageAlertOptions: UsageAlertOptions {
         get {

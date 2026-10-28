@@ -26,9 +26,12 @@ enum PanelMotionDiagnostics {
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let now = Date()
-            let snapshot = UsageSnapshot(fiveHour: .init(kind: .fiveHour, usedPercent: 42, durationMinutes: 300, resetsAt: now.addingTimeInterval(3_600)),
+            let snapshotWithoutExpiry = UsageSnapshot(fiveHour: .init(kind: .fiveHour, usedPercent: 42, durationMinutes: 300, resetsAt: now.addingTimeInterval(3_600)),
                 weekly: .init(kind: .weekly, usedPercent: 64, durationMinutes: 10_080, resetsAt: now.addingTimeInterval(86_400)),
                 planType: "plus", limitName: nil, creditBalance: "0", unlimitedCredits: false, availableResetCredits: 2, fetchedAt: now)
+            let snapshot = UsageSnapshot(fiveHour: snapshotWithoutExpiry.fiveHour, weekly: snapshotWithoutExpiry.weekly,
+                planType: "plus", limitName: nil, creditBalance: "0", unlimitedCredits: false,
+                availableResetCredits: 2, fetchedAt: now, earliestAvailableResetExpiry: now.addingTimeInterval(86_400))
             let repository = UsageHistoryRepository(url: temporary.appendingPathComponent("history.sqlite"))
             let monitor = UsageMonitoringController(history: repository, preferences: Preferences(defaults: defaults),
                 sender: UsageMonitoringUIDiagnostics.FakeNotifications())
@@ -41,7 +44,7 @@ enum PanelMotionDiagnostics {
                 .fiveHour: .init(kind: .fiveHour, duration: 1_800, decrease: 8),
                 .weekly: .init(kind: .weekly, duration: 21_600, decrease: 12),
             ]
-            panel.update(snapshot: snapshot, freshness: .live, error: nil, isRefreshing: false, recentChanges: changes)
+            panel.update(snapshot: snapshotWithoutExpiry, freshness: .live, error: nil, isRefreshing: false, recentChanges: changes)
             panel.onShowHistory = { [weak panel] in panel?.showHistory() }
             guard let button = item.button else { throw UsageMonitoringDiagnostics.CheckFailure(message: "status button unavailable") }
             // A newly created status item needs a run-loop turn to acquire its menu-bar position.
@@ -52,6 +55,18 @@ enum PanelMotionDiagnostics {
                 throw UsageMonitoringDiagnostics.CheckFailure(message: "real popover unavailable")
             }
             try check(panel.isShown && window.isVisible, "real status-item popover is visible")
+            panel.update(snapshot: snapshot, freshness: .live, error: nil, isRefreshing: false, recentChanges: changes)
+            navigation.view.layoutSubtreeIfNeeded()
+            let labels = UIDiagnosticSupport.descendants(navigation.view).compactMap { $0 as? NSTextField }
+            guard let expiry = labels.first(where: { $0.stringValue.hasPrefix("最近到期 ") }),
+                  let count = labels.first(where: { $0.stringValue == "可用重置：2 次" }) else {
+                throw UsageMonitoringDiagnostics.CheckFailure(message: "reset expiry did not appear in the real popover after refresh")
+            }
+            let expiryRect = navigation.view.convert(expiry.alignmentRect(forFrame: expiry.frame), from: expiry.superview)
+            let countRect = navigation.view.convert(count.alignmentRect(forFrame: count.frame), from: count.superview)
+            try check(!expiry.isHidden && navigation.view.bounds.contains(expiryRect)
+                      && expiryRect.width >= expiry.intrinsicContentSize.width - 1 && expiryRect.minX > countRect.maxX,
+                      "reset expiry fits to the right of the count after a live panel update")
             let compact = navigation.view.bounds.size
             let chromeWidth = window.frame.width - compact.width
             let open = UIDiagnosticSupport.descendants(navigation.view).compactMap { $0 as? NSButton }.first { $0.title == "额度图表…" }!
@@ -117,6 +132,10 @@ enum PanelMotionDiagnostics {
             panel.update(snapshot: snapshot, freshness: .live, error: nil, isRefreshing: false, recentChanges: changes)
             if CommandLine.arguments.contains("--panel-motion-preview") {
                 panel.showHistory(); await panel.waitForHistoryRead()
+                if let previewWindow = panel.navigation?.view.window {
+                    let identity = ["windowID": previewWindow.windowNumber, "pid": Int(ProcessInfo.processInfo.processIdentifier)]
+                    try JSONSerialization.data(withJSONObject: identity).write(to: folder.appendingPathComponent("preview-window.json"))
+                }
                 print("Preview ready (isolated example data).")
                 fflush(stdout)
                 try await Task.sleep(for: .seconds(45))

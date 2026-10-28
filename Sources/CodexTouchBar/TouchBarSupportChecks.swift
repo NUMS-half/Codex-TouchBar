@@ -37,6 +37,7 @@ enum TouchBarSupportChecks {
         var snapshots: [UsageSnapshot?] = []
         func setVisible(_ value: Bool) { visible = value }
         func update(snapshot: UsageSnapshot?, freshness: SnapshotFreshness, isRefreshing: Bool) { snapshots.append(snapshot) }
+        func updateSessionTPS(_ snapshot: SessionTPSSnapshot, enabled: Bool) {}
         func applyConfiguration(_ configuration: TouchBarConfiguration) {}
         func showFeedback(_ message: String) {}
     }

@@ -40,7 +40,7 @@ enum ButtonSettingsDiagnostics {
         let buttons = views.compactMap { $0 as? NSButton }
         guard popups.count == 4, fields.count == 4, previews.count == 4,
               let save = buttons.first(where: { $0.title == "保存" }),
-              let cancel = buttons.first(where: { $0.title == "取消" }),
+              let cancel = buttons.first(where: { $0.title == "撤销更改" }),
               let restore = buttons.first(where: { $0.title == "恢复默认" }),
               popups[0].titleOfSelectedItem == "新对话",
               previews.allSatisfy({ $0.frame.size == NSSize(width: 68, height: 30) }) else { return false }
@@ -132,6 +132,20 @@ enum ButtonSettingsDiagnostics {
               preferences.touchBarConfiguration.slots[3].action == .command(.builtIn(.markUnread)),
               Preferences(defaults: defaults).touchBarConfiguration == preferences.touchBarConfiguration,
               counts.buttons == 4, counts.general == 0 else { return false }
+
+        controller.beginEditing()
+        popups[1].selectItem(withTitle: "当前对话 TPS")
+        _ = NSApp.sendAction(action, to: popups[1].target, from: popups[1])
+        guard !fields[1].isEnabled, previews[1].configuration.action == .sessionTPS,
+              preferences.touchBarConfiguration.slots[1].action != .sessionTPS else { return false }
+        cancel.performClick(nil)
+        controller.beginEditing()
+        guard previews[1].configuration.action != .sessionTPS else { return false }
+        popups[1].selectItem(withTitle: "当前对话 TPS")
+        _ = NSApp.sendAction(action, to: popups[1].target, from: popups[1])
+        save.performClick(nil)
+        guard Preferences(defaults: defaults).touchBarConfiguration.slots[1].action == .sessionTPS,
+              preferences.sessionTPSOptions.touchBar else { return false }
 
         if let previewPath {
             preferences.touchBarConfiguration = .default
@@ -238,7 +252,7 @@ enum ButtonSettingsDiagnostics {
 
         let readout = StatusUsageReadoutView()
         readout.update(fiveHour: fiveHour, weekly: weekly)
-        let labels = readout.subviews.compactMap { $0 as? NSTextField }.filter { ["5H", "周"].contains($0.stringValue) }
+        let labels = readout.subviews.compactMap { $0 as? NSTextField }.filter { ["H", "W"].contains($0.stringValue) }
         guard labels.count == 2 else { return false }
         for (appearance, minimum, maximum) in [(NSAppearance.Name.aqua, 0.0, 0.2), (.darkAqua, 0.85, 0.91)] {
             readout.appearance = NSAppearance(named: appearance)

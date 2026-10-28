@@ -1,5 +1,45 @@
 import AppKit
 
+if CommandLine.arguments.contains("--session-tps-four-digit-self-test") {
+    MainActor.assumeIsolated {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        Task { @MainActor in
+            do {
+                try FourDigitTPSDiagnostics.run(folder: URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("build/four-digit-tps"))
+                exit(0)
+            } catch { print("Four-digit TPS display self-test failed: \(error)"); exit(1) }
+        }
+        NSApplication.shared.run()
+    }
+}
+
+if CommandLine.arguments.contains("--session-tps-ui-self-test") || CommandLine.arguments.contains("--session-tps-live-probe") || CommandLine.arguments.contains("--session-tps-switch-probe") {
+    MainActor.assumeIsolated {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        Task { @MainActor in
+            if CommandLine.arguments.contains("--session-tps-live-probe") || CommandLine.arguments.contains("--session-tps-switch-probe") {
+                await SessionTPSUIDiagnostics.liveProbe(); exit(0)
+            }
+            let folder = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("build/session-tps-previews")
+            exit(await SessionTPSUIDiagnostics.run(folder: folder) ? 0 : 1)
+        }
+        NSApplication.shared.run()
+    }
+}
+
+if CommandLine.arguments.contains("--session-tps-menubar-preview") {
+    MainActor.assumeIsolated {
+        NSApplication.shared.setActivationPolicy(.accessory)
+        Task { @MainActor in
+            let folder = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("build/menu-bar-tps-preview")
+            exit(await MenuBarTPSDiagnostics.preview(folder: folder) ? 0 : 1)
+        }
+        NSApplication.shared.run()
+    }
+}
+
+if CommandLine.arguments.contains("--session-tps-self-test") { exit(SessionTPSChecks.run() ? 0 : 1) }
+
 if CommandLine.arguments.contains("--update-check-self-test") {
     MainActor.assumeIsolated {
         NSApplication.shared.setActivationPolicy(.prohibited)

@@ -62,6 +62,10 @@ private final class SettingsBackgroundView: NSView {
     override func draw(_ dirtyRect: NSRect) { NSColor.windowBackgroundColor.setFill(); bounds.fill() }
 }
 
+private final class SettingsDocumentView: NSView {
+    override var isFlipped: Bool { true }
+}
+
 @MainActor
 final class GeneralSettingsController: NSViewController {
     private let preferences: Preferences
@@ -76,6 +80,7 @@ final class GeneralSettingsController: NSViewController {
     private let loginStatus = NSTextField(wrappingLabelWithString: "")
     private let loginSettings = NSButton(title: "打开登录项设置…", target: nil, action: nil)
     private var observers: [NSObjectProtocol] = []
+    private lazy var sessionTPS = SessionTPSSettingsView(preferences: preferences, touchBarSupport: touchBarSupport)
 
     init(preferences: Preferences, loginItems: any LoginItemManaging, touchBarSupport: TouchBarSupport) {
         self.preferences = preferences; self.loginItems = loginItems; self.touchBarSupport = touchBarSupport
@@ -132,23 +137,33 @@ final class GeneralSettingsController: NSViewController {
         let refreshGroup = SettingsGroupView(title: "额度刷新", subtitle: "各项独立生效，睡眠时暂停。菜单栏刷新图标和右键“刷新”始终可用。", controls: [rows])
         let note = NSTextField(wrappingLabelWithString: "曲线和提醒依据成功查询更新；关闭自动刷新后，仍会记录手动查询。")
         note.font = .systemFont(ofSize: 11); note.textColor = .secondaryLabelColor
-        let stack = NSStackView(views: [appGroup, refreshGroup, note])
+        let stack = NSStackView(views: [appGroup, sessionTPS, refreshGroup, note])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
-        stack.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(stack)
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false
+        scroll.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(scroll)
+        let document = SettingsDocumentView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = document
+        stack.translatesAutoresizingMaskIntoConstraints = false; document.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: view.topAnchor), stack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: view.topAnchor), scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            stack.topAnchor.constraint(equalTo: document.topAnchor), stack.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: document.trailingAnchor), stack.bottomAnchor.constraint(equalTo: document.bottomAnchor),
             appGroup.widthAnchor.constraint(equalTo: stack.widthAnchor), refreshGroup.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            note.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor),
+            note.widthAnchor.constraint(equalTo: stack.widthAnchor), sessionTPS.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
         refresh()
     }
     func updateTouchBarSupport(_ support: TouchBarSupport) {
         touchBarSupport = support
+        sessionTPS.updateTouchBarSupport(support)
         refresh()
     }
     func refresh() {
+        sessionTPS.refresh()
         touchBarToggle.isHidden = !touchBarSupport.isUsable
         refreshToggles[.touchBar]?.isHidden = !touchBarSupport.isUsable
         appGroup.setSubtitle(touchBarSupport.settingsDescription)
@@ -208,7 +223,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         var subtitle: String { switch self {
         case .general: return "管理应用行为和各类额度刷新触发。修改立即生效。"
         case .alerts: return "分别管理5H和周额度的低额与恢复提醒。修改自动保存。"
-        case .shortcuts: return "配置四个Touch Bar按钮。预览修改后，点击保存应用。"
+        case .shortcuts: return "配置四个Touch Bar按钮。保存后生效，可撤销未保存的更改。"
         } }
         var identifier: NSToolbarItem.Identifier { .init("settings.\(rawValue)") }
     }

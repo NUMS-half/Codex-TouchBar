@@ -6,6 +6,10 @@ enum UIDiagnosticSupport {
     enum RenderError: Error { case bitmapUnavailable, pngUnavailable }
 
     static func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap { descendants($0) } }
+    static func layoutContainer(for control: NSView, root: NSView) -> NSView {
+        if let document = control.enclosingScrollView?.documentView, control.isDescendant(of: document) { return document }
+        return root
+    }
     static func render(_ view: NSView, to url: URL) throws {
         view.layoutSubtreeIfNeeded()
         guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {

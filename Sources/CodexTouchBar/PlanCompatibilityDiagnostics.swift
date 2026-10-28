@@ -5,7 +5,7 @@ enum PlanCompatibilityDiagnostics {
     static func run() -> Bool {
         do {
             try parsing()
-            try namesAndRequests()
+            try planNames()
             try cacheCompatibility()
             try windowTransitions()
             print("Plan compatibility self-test passed (server windows, family names, unknown resets, cache, alert baselines)")
@@ -70,22 +70,13 @@ enum PlanCompatibilityDiagnostics {
         }
     }
 
-    static func namesAndRequests() throws {
+    static func planNames() throws {
         let check = UsageMonitoringDiagnostics.check
         for (raw, expected) in [(" free ", "Free"), ("\tGo\n", "Go"), ("PLUS", "Plus"),
                                 ("pro", "Pro"), ("ProLite", "Pro"), ("promax", "Pro"),
                                 (" pro   x5 ", "Pro"), ("pro\tx20", "Pro"), ("prox5", "Pro"), ("PROX20", "Pro"),
                                 (" Future Plan ", "Future Plan"), ("pro-next", "pro-next")] {
             try check(displayPlanName(raw) == expected, "known families normalize; unknown names retain readable raw text")
-        }
-        for explicit in [false, true] {
-            for visible in [false, true] {
-                for expiry in [false, true] {
-                    let details = QuotaRefreshPolicy.includesResetCreditDetails(explicit: explicit, panelVisible: visible,
-                                                                              expiryReminderEnabled: expiry)
-                    try check(details == ([explicit, visible, expiry].contains(true)), "all detail request combinations")
-                }
-            }
         }
     }
 

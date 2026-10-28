@@ -9,4 +9,4 @@
 - `shortcut-editor.png`：快捷操作编辑区。
 - `quota-history.png`：620×460紧凑图表页，带返回按钮、圆角渐变柱、刷新标记；5H默认近6小时/每柱10分钟，可切换近12小时/每柱15分钟，跨刷新空档沿用前值。
 
-菜单面板与额度图表使用`--panel-motion-self-test`自身窗口捕获，顶部“UI检查”是临时诊断图标，不含真实账户数据。其他源预览由`--settings-self-test --settings-preview PATH`和`--monitoring-ui-self-test`生成。README中的取值仅用于展示，不代表应用默认设置。
+菜单面板与额度图表使用`--panel-motion-self-test`自身窗口捕获，部分素材顶部的“UI检查”是临时诊断图标，不含真实账户数据。其他源预览由`--settings-self-test --settings-preview PATH`和`--monitoring-ui-self-test`生成。README中的取值仅用于展示，不代表应用默认设置。

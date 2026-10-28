@@ -9,9 +9,17 @@ final class UsageStore {
     private(set) var freshness: SnapshotFreshness = .cached
     private(set) var errorMessage: String?
     private(set) var isRefreshing = false
+    private(set) var sessionTPS = SessionTPSSnapshot()
+
+    func updateSessionTPS(_ value: SessionTPSSnapshot) {
+        guard value != sessionTPS else { return }
+        sessionTPS = value
+        onSessionTPSChange?()
+    }
     private var activeFetchIncludesResetDetails = false
     private var detailedRefreshPending = false
 
+    var onSessionTPSChange: (() -> Void)?
     var onChange: (() -> Void)?
     var onSuccessfulRefresh: ((UsageSnapshot) -> Void)?
 
@@ -27,7 +35,7 @@ final class UsageStore {
         }
     }
 
-    func refresh(includeResetCreditDetails: Bool = false) {
+    func refresh(includeResetCreditDetails: Bool = true) {
         if isRefreshing {
             if includeResetCreditDetails && !activeFetchIncludesResetDetails {
                 detailedRefreshPending = true

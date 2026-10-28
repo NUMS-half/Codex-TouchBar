@@ -89,17 +89,20 @@ private final class TouchBarQuotaCard: NSButton {
     }
 
     private func drawSecondary(_ text: String, in card: NSRect) {
+        let displayed = text
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .right
         paragraph.lineBreakMode = .byTruncatingTail
+        let left = card.minX + 82
+        let width = max(0, card.maxX - left - 9)
+        let fontSize: CGFloat = expanded ? 10 : 9
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: expanded ? 10 : 9, weight: .regular),
+            .font: NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .regular),
             .foregroundColor: isStale && usageWindow != nil ? NSColor.systemOrange : NSColor.secondaryLabelColor,
             .paragraphStyle: paragraph,
         ]
-        let left = card.minX + 82
-        (text as NSString).draw(
-            in: NSRect(x: left, y: card.maxY - 16, width: max(0, card.maxX - left - 9), height: 14),
+        (displayed as NSString).draw(
+            in: NSRect(x: left, y: card.maxY - 16, width: width, height: 14),
             withAttributes: attributes
         )
     }
@@ -282,6 +285,8 @@ private final class TouchBarUsageView: NSView {
         updateCards()
     }
 
+    func updateSessionTPS(_ snapshot: SessionTPSSnapshot?) { actionSlots.forEach { $0.updateSessionTPS(snapshot) } }
+
     func applyConfiguration(_ configuration: TouchBarConfiguration) {
         for (slot, binding) in zip(actionSlots, configuration.slots) { slot.update(binding) }
         feedbackGeneration += 1
@@ -376,6 +381,8 @@ private final class FallbackReadoutView: NSView {
         let week = snapshot?.weekly.map { "\($0.remainingPercent)" } ?? "—"
         label.stringValue = "5H \(five) · W \(week)"
     }
+
+
 }
 
 final class TouchBarController: NSObject, NSTouchBarDelegate, TouchBarPresenting {
@@ -441,6 +448,10 @@ final class TouchBarController: NSObject, NSTouchBarDelegate, TouchBarPresenting
         assert(Thread.isMainThread)
         usageView.update(snapshot: snapshot, refreshing: isRefreshing, freshness: freshness)
         fallbackView.update(snapshot)
+    }
+
+    func updateSessionTPS(_ snapshot: SessionTPSSnapshot, enabled: Bool) {
+        usageView.updateSessionTPS(enabled ? snapshot : nil)
     }
 
     func applyConfiguration(_ configuration: TouchBarConfiguration) {

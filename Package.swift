@@ -7,7 +7,8 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "CodexTouchBar",
-            path: "Sources/CodexTouchBar"
+            path: "Sources/CodexTouchBar",
+            linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .testTarget(
             name: "CodexTouchBarTests",

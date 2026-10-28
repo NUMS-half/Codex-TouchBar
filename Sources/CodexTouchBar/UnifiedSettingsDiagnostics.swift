@@ -65,19 +65,45 @@ enum UnifiedSettingsDiagnostics {
             try check(interval.isEnabled && !background.isEnabled && interval.selectedTag() == 120, "re-enabling one timer preserves interval and other timer state")
 
             controller.select(.shortcuts, readCatalog: false)
+            let save = buttons().first { $0.title == "保存" }!
+            guard let undo = buttons().first(where: { $0.title == "撤销更改" }),
+                  let editStatus = UIDiagnosticSupport.descendants(content).compactMap({ $0 as? NSTextField })
+                    .first(where: { $0.accessibilityIdentifier() == "shortcuts.editStatus" }) else {
+                throw UsageMonitoringDiagnostics.CheckFailure(message: "shortcut actions need explicit nearby feedback and an unambiguous undo label")
+            }
+            try check(!save.isEnabled && !undo.isEnabled && editStatus.stringValue == "尚未修改", "unchanged shortcut actions are disabled")
             func fields() -> [NSTextField] { UIDiagnosticSupport.descendants(content).compactMap { $0 as? NSTextField }.filter(\.isEditable).sorted { $0.tag < $1.tag } }
             func rename(_ value: String) {
                 let field = fields()[0]; field.stringValue = value
                 (field.delegate as? TouchBarSettingsController)?.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: field))
             }
+            func captureShortcuts(_ state: String) throws {
+                guard let folder else { return }
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+                    window.appearance = NSAppearance(named: appearance)
+                    try UIDiagnosticSupport.render(content.superview ?? content, to: folder.appendingPathComponent("shortcuts-\(state)-\(appearance.rawValue).png"))
+                }
+            }
             rename("草稿保留")
+            let shortcuts = fields()[0].delegate as! TouchBarSettingsController
+            shortcuts.applyCatalog(.init(message: "合成功能读取结果"))
+            try check(save.isEnabled && undo.isEnabled && editStatus.stringValue == "有未保存的修改", "draft enables actions and shows pending feedback")
+            try captureShortcuts("pending")
             controller.select(.general); controller.select(.shortcuts, readCatalog: false)
             try check(fields()[0].stringValue == "草稿保留" && preferences.touchBarConfiguration == .default, "page switch preserves unsaved draft")
-            buttons().first { $0.title == "取消" }!.performClick(nil)
-            try check(fields()[0].stringValue.isEmpty && preferences.touchBarConfiguration == .default, "cancel restores persisted settings")
+            undo.performClick(nil)
+            try check(fields()[0].stringValue.isEmpty && preferences.touchBarConfiguration == .default
+                      && !save.isEnabled && !undo.isEnabled && editStatus.stringValue == "已撤销更改", "undo restores settings and confirms completion")
+            try captureShortcuts("reverted")
             rename("已保存")
-            buttons().first { $0.title == "保存" }!.performClick(nil)
-            try check(preferences.touchBarConfiguration.slots[0].customLabel == "已保存", "save applies shortcuts")
+            save.performClick(nil)
+            shortcuts.applyCatalog(.init(message: "合成读取失败", needsPermission: true))
+            try check(preferences.touchBarConfiguration.slots[0].customLabel == "已保存"
+                      && !save.isEnabled && !undo.isEnabled && editStatus.stringValue == "已保存并生效", "save feedback survives asynchronous catalog results")
+            try captureShortcuts("saved")
+            rename("  已保存  ")
+            try check(!save.isEnabled && !undo.isEnabled, "equivalent normalized labels do not create pending changes")
             rename("关闭丢弃")
             window.close()
             controller.select(.shortcuts, readCatalog: false)
@@ -109,14 +135,24 @@ enum UnifiedSettingsDiagnostics {
                         window.appearance = NSAppearance(named: appearance)
                         content.layoutSubtreeIfNeeded()
                         for control in UIDiagnosticSupport.descendants(content).filter({ $0 is NSControl && !$0.isHidden }) {
-                            let rect = content.convert(control.bounds, from: control)
-                            try check(content.bounds.insetBy(dx: -6, dy: -6).contains(rect), "unified settings controls fit")
+                            let container = UIDiagnosticSupport.layoutContainer(for: control, root: content)
+                            let rect = container.convert(control.bounds, from: control)
+                            try check(container.bounds.insetBy(dx: -6, dy: -6).contains(rect), "unified settings controls fit their window or scroll document")
                         }
                         try UIDiagnosticSupport.render(content.superview ?? content, to: folder.appendingPathComponent("settings-\(page.rawValue)-\(appearance.rawValue).png"))
+                        if page == .general, let scroll = UIDiagnosticSupport.descendants(content).compactMap({ $0 as? NSScrollView }).first,
+                           let document = scroll.documentView {
+                            try check(document.bounds.height > scroll.contentView.bounds.height && scroll.hasVerticalScroller,
+                                      "general settings exposes remaining controls through native scrolling")
+                            document.scroll(NSPoint(x: 0, y: max(0, document.bounds.height - scroll.contentView.bounds.height)))
+                            content.layoutSubtreeIfNeeded()
+                            try UIDiagnosticSupport.render(content.superview ?? content, to: folder.appendingPathComponent("settings-general-bottom-\(appearance.rawValue).png"))
+                            document.scroll(.zero)
+                        }
                     }
                 }
             }
-            print("Unified settings self-test passed (navigation, draft lifecycle, general switches, login failure, alerts, appearances)")
+            print("Unified settings self-test passed (navigation, draft lifecycle, save/undo feedback, disabled clean actions, catalog independence, general switches, login failure, alerts, appearances)")
             return true
         } catch { print("Unified settings self-test failed: \(error)"); return false }
     }

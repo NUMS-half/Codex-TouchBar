@@ -127,6 +127,15 @@ enum QuotaExperienceUIDiagnostics {
                 try check(fitted.width == 340 && fitted.height < 470, "quota panel remains compact")
                 let cards = UIDiagnosticSupport.descendants(content).compactMap { $0 as? QuotaCardView }
                 try check(cards.count == 2 && cards.allSatisfy { abs($0.frame.width - 308) < 1 }, "both quota cards fill the panel content width")
+                for card in cards {
+                    let number = card.subviews.compactMap { $0 as? NSTextField }.first { $0.font?.pointSize == 25 }!
+                    let progress = card.subviews.first { String(describing: type(of: $0)) == "QuotaProgressView" }!
+                    let numberRect = number.alignmentRect(forFrame: number.frame)
+                    let gap = numberRect.minY - progress.frame.maxY
+                    print("Quota number/progress gap: \(gap)pt; card height: \(card.frame.height)pt (\(state), \(appearance.rawValue))")
+                    try check((6...10).contains(gap), "quota number and progress bar stay close without touching")
+                    try check(card.frame.height <= 104, "quota card contains no fixed-height spacer")
+                }
                 for control in controls where !control.isHidden && !control.ancestorsHidden {
                     let rect = content.convert(control.alignmentRect(forFrame: control.frame), from: control.superview)
                     try check(content.bounds.insetBy(dx: -1, dy: -1).contains(rect), "quota panel controls fit in both appearances")

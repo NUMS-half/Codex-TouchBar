@@ -2,6 +2,7 @@ import Foundation
 
 enum SelfTest {
     static func run() -> Bool {
+        guard SessionTPSChecks.run() else { return false }
         guard AppMenuChecks.run() else { return false }
         guard AppServerResponseChecks.run() else { return false }
         guard RefreshPolicyChecks.run() else { return false }

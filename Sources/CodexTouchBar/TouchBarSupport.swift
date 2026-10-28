@@ -40,6 +40,7 @@ struct TouchBarSupport: Equatable {
 protocol TouchBarPresenting: AnyObject {
     func setVisible(_ visible: Bool)
     func update(snapshot: UsageSnapshot?, freshness: SnapshotFreshness, isRefreshing: Bool)
+    func updateSessionTPS(_ snapshot: SessionTPSSnapshot, enabled: Bool)
     func applyConfiguration(_ configuration: TouchBarConfiguration)
     func showFeedback(_ message: String)
 }

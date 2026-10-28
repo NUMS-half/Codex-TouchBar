@@ -5,6 +5,17 @@ import ScreenCaptureKit
 @MainActor
 enum NativePopoverCapture {
     static func capture(_ window: NSWindow, to url: URL) async throws {
+        // Explicit diagnostic alternative for desktops where ScreenCaptureKit does not return.
+        // Use the actual window frame view. Compositor-only chrome/material can be absent;
+        // this mode verifies geometry, not the final screen-composited arrow appearance.
+        if CommandLine.arguments.contains("--native-frame-render") {
+            guard let frame = window.contentView?.superview else {
+                throw UsageMonitoringDiagnostics.CheckFailure(message: "native window frame unavailable")
+            }
+            try UIDiagnosticSupport.render(frame, to: url)
+            print("Native frame rendered with AppKit: \(url.lastPathComponent)")
+            return
+        }
         guard #available(macOS 14.4, *) else {
             print("Native window capture requires macOS 14.4; geometry checks still run")
             return

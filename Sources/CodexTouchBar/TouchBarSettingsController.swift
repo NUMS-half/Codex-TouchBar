@@ -19,6 +19,9 @@ final class TouchBarSettingsController: NSViewController, NSTextFieldDelegate {
     private var details: [NSTextField] = []
     private var previews: [TouchBarActionSlotView] = []
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
+    private let editStatusLabel = NSTextField(labelWithString: "")
+    private let undoButton = NSButton(title: "撤销更改", target: nil, action: nil)
+    private let saveButton = NSButton(title: "保存", target: nil, action: nil)
     private let refreshButton = NSButton(title: "刷新 ChatGPT 功能", target: nil, action: nil)
     private let permissionButton = NSButton(title: "授权辅助功能…", target: nil, action: nil)
     private var readTask: Task<Void, Never>?
@@ -47,9 +50,10 @@ final class TouchBarSettingsController: NSViewController, NSTextFieldDelegate {
     func beginEditing() {
         draft = preferences.touchBarConfiguration.slots
         catalog = DesktopMenuCatalog()
-        statusLabel.stringValue = "仅显示可读取的 ChatGPT 原生菜单功能，保存后生效。完整快捷键目录尚未接入，刷新无需定期操作。"
+        statusLabel.stringValue = "可配置 ChatGPT 功能或当前对话 TPS，保存后生效。TPS 仅显示速度，无需辅助功能权限。"
         permissionButton.isHidden = true
         renderEditor()
+        updateEditingState()
     }
 
     func applyCatalog(_ result: DesktopMenuCatalog) {
@@ -111,13 +115,16 @@ final class TouchBarSettingsController: NSViewController, NSTextFieldDelegate {
         addButton(refreshButton, frame: NSRect(x: 20, y: 58, width: 160, height: 28), action: #selector(refreshCatalog))
         addButton(permissionButton, frame: NSRect(x: 190, y: 58, width: 150, height: 28), action: #selector(requestPermission))
         let restore = NSButton(title: "恢复默认", target: nil, action: nil)
-        let cancel = NSButton(title: "取消", target: nil, action: nil)
-        let save = NSButton(title: "保存", target: nil, action: nil)
+        editStatusLabel.frame = NSRect(x: 146, y: 21, width: 246, height: 18)
+        editStatusLabel.font = .systemFont(ofSize: 11)
+        editStatusLabel.alignment = .right
+        editStatusLabel.setAccessibilityIdentifier("shortcuts.editStatus")
+        content.addSubview(editStatusLabel)
         addButton(restore, frame: NSRect(x: 20, y: 15, width: 110, height: 30), action: #selector(restoreDefaults))
-        addButton(cancel, frame: NSRect(x: 410, y: 15, width: 90, height: 30), action: #selector(cancelEditing))
-        addButton(save, frame: NSRect(x: 510, y: 15, width: 90, height: 30), action: #selector(saveConfiguration))
-        cancel.keyEquivalent = "\u{1b}"
-        save.keyEquivalent = "\r"
+        addButton(undoButton, frame: NSRect(x: 410, y: 15, width: 90, height: 30), action: #selector(cancelEditing))
+        addButton(saveButton, frame: NSRect(x: 510, y: 15, width: 90, height: 30), action: #selector(saveConfiguration))
+        undoButton.keyEquivalent = "\u{1b}"
+        saveButton.keyEquivalent = "\r"
     }
 
     private func addLabel(_ title: String, frame: NSRect) {
@@ -137,7 +144,7 @@ final class TouchBarSettingsController: NSViewController, NSTextFieldDelegate {
     }
 
     private func renderEditor() {
-        let common = DesktopMenuAction.allCases.map { TouchBarSlotAction.command(.builtIn($0)) } + [.navigationPair]
+        let common = DesktopMenuAction.allCases.map { TouchBarSlotAction.command(.builtIn($0)) } + [.navigationPair, .sessionTPS]
         let more = catalog.candidates.compactMap { candidate -> TouchBarSlotAction? in
             guard case .native = candidate.command else { return nil }
             return .command(candidate.command)
@@ -167,9 +174,10 @@ final class TouchBarSettingsController: NSViewController, NSTextFieldDelegate {
             popup.menu = menu
             if let selection = options.firstIndex(of: draft[index].action) { popup.selectItem(withTag: selection) }
             let navigation = draft[index].action == .navigationPair
-            names[index].isEnabled = !navigation
+            let readout = draft[index].action == .sessionTPS
+            names[index].isEnabled = !navigation && !readout
             names[index].stringValue = draft[index].customLabel ?? ""
-            names[index].placeholderString = navigation ? "固定箭头" : draft[index].buttonTitle
+            names[index].placeholderString = navigation ? "固定箭头" : (readout ? "实时速度" : draft[index].buttonTitle)
             updateDetail(index)
         }
         updatePreview()
@@ -202,6 +210,8 @@ final class TouchBarSettingsController: NSViewController, NSTextFieldDelegate {
 
     private func updateDetail(_ index: Int) {
         switch draft[index].action {
+        case .sessionTPS:
+            details[index].stringValue = "显示当前对话输出速度，占一个快捷操作位置；点击无操作"
         case .navigationPair:
             details[index].stringValue = "左右分别执行后退、前进，共占一个按钮区"
         case let .command(command):
@@ -222,6 +232,14 @@ final class TouchBarSettingsController: NSViewController, NSTextFieldDelegate {
         for (preview, binding) in zip(previews, draft) { preview.update(binding) }
     }
 
+    private func updateEditingState(message: String? = nil) {
+        let hasChanges = TouchBarConfiguration(slots: draft) != preferences.touchBarConfiguration
+        undoButton.isEnabled = hasChanges
+        saveButton.isEnabled = hasChanges
+        editStatusLabel.stringValue = message ?? (hasChanges ? "有未保存的修改" : "尚未修改")
+        editStatusLabel.textColor = hasChanges ? .labelColor : .secondaryLabelColor
+    }
+
     @objc private func selectAction(_ sender: NSPopUpButton) {
         let index = sender.tag
         let option = sender.selectedTag()
@@ -230,25 +248,29 @@ final class TouchBarSettingsController: NSViewController, NSTextFieldDelegate {
             draft[index] = .init(action: options[option])
         }
         renderEditor()
+        updateEditingState()
     }
 
     func controlTextDidChange(_ notification: Notification) {
         guard let field = notification.object as? NSTextField, draft.indices.contains(field.tag) else { return }
         draft[field.tag].customLabel = field.stringValue
         updatePreview()
+        updateEditingState()
     }
 
     @objc private func restoreDefaults() {
         view.window?.makeFirstResponder(nil)
         draft = TouchBarConfiguration.default.slots
         renderEditor()
+        updateEditingState(message: TouchBarConfiguration(slots: draft) == preferences.touchBarConfiguration
+                           ? "已恢复默认" : "已恢复默认，尚未保存")
     }
 
     @objc private func cancelEditing() {
         view.window?.makeFirstResponder(nil)
         draft = preferences.touchBarConfiguration.slots
         renderEditor()
-        statusLabel.stringValue = "已取消未保存的修改。"
+        updateEditingState(message: "已撤销更改")
     }
 
     @objc private func saveConfiguration() {
@@ -257,10 +279,12 @@ final class TouchBarSettingsController: NSViewController, NSTextFieldDelegate {
         for index in draft.indices where draft[index].action != .navigationPair {
             draft[index].customLabel = names[index].stringValue
         }
-        preferences.touchBarConfiguration = TouchBarConfiguration(slots: draft)
+        let configuration = TouchBarConfiguration(slots: draft)
+        guard configuration != preferences.touchBarConfiguration else { updateEditingState(); return }
+        preferences.touchBarConfiguration = configuration
         draft = preferences.touchBarConfiguration.slots
         renderEditor()
-        statusLabel.stringValue = "已保存，Touch Bar 已应用新的快捷操作。"
+        updateEditingState(message: "已保存并生效")
     }
 
     @objc private func refreshCatalog() { updateCatalog() }

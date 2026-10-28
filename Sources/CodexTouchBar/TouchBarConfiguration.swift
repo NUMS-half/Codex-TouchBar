@@ -59,11 +59,13 @@ enum DesktopCommand: Codable, Equatable, Sendable {
 enum TouchBarSlotAction: Codable, Equatable, Sendable {
     case command(DesktopCommand)
     case navigationPair
+    case sessionTPS
 
     var displayName: String {
         switch self {
         case let .command(command): return command.displayName
         case .navigationPair: return "后退／前进"
+        case .sessionTPS: return "当前对话 TPS"
         }
     }
 }
@@ -74,6 +76,7 @@ struct TouchBarSlotConfiguration: Codable, Equatable, Sendable {
 
     var buttonTitle: String {
         if case .navigationPair = action { return "←／→" }
+        if case .sessionTPS = action { return "⚡ — tok/s" }
         if let label = cleanedLabel, !label.isEmpty { return label }
         if action == .command(.builtIn(.newChat)) { return "＋ 新对话" }
         return action.displayName.replacingOccurrences(of: "…", with: "")
@@ -88,7 +91,7 @@ struct TouchBarSlotConfiguration: Codable, Equatable, Sendable {
     var normalized: Self {
         var result = self
         result.customLabel = cleanedLabel.flatMap { $0.isEmpty ? nil : $0 }
-        if case .navigationPair = action { result.customLabel = nil }
+        if action == .navigationPair || action == .sessionTPS { result.customLabel = nil }
         return result
     }
 

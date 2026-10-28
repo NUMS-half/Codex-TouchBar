@@ -45,8 +45,9 @@ enum TouchBarSupportUIDiagnostics {
                 try check(preferences.touchBarEnabled && preferences.refreshPolicy.allows(.touchBar)
                           && preferences.touchBarConfiguration == saved, "capability changes preserve all Touch Bar preferences")
                 for control in UIDiagnosticSupport.descendants(content).compactMap({ $0 as? NSControl }) where !control.isHiddenOrHasHiddenAncestor {
-                    let rect = content.convert(control.alignmentRect(forFrame: control.frame), from: control.superview)
-                    try check(rect.isEmpty || content.bounds.insetBy(dx: -2, dy: -2).contains(rect), "hardware-specific settings fit the existing window")
+                    let container = UIDiagnosticSupport.layoutContainer(for: control, root: content)
+                    let rect = container.convert(control.alignmentRect(forFrame: control.frame), from: control.superview)
+                    try check(rect.isEmpty || container.bounds.insetBy(dx: -2, dy: -2).contains(rect), "hardware-specific settings fit the window or scroll document")
                 }
                 if let folder { try UIDiagnosticSupport.render(content, to: folder.appendingPathComponent("hardware-settings-\(name)-\(appearance.rawValue).png")) }
             }

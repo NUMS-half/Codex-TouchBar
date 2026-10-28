@@ -4,7 +4,7 @@ import XCTest
 
 final class PlanCompatibilityTests: XCTestCase {
     func testServerWindowsAndUnknownResetCounts() throws { try PlanCompatibilityDiagnostics.parsing() }
-    func testFamilyNamesAndDetailRequestConditions() throws { try PlanCompatibilityDiagnostics.namesAndRequests() }
+    func testFamilyNames() throws { try PlanCompatibilityDiagnostics.planNames() }
     func testLegacyAndUnknownCacheCounts() throws { try PlanCompatibilityDiagnostics.cacheCompatibility() }
     func testDisappearingWindowsResetOnlyTheirAlertBaseline() throws { try PlanCompatibilityDiagnostics.windowTransitions() }
 }

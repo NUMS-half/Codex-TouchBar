@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: SettingsWindowController?
     private var statusItem: NSStatusItem!
     private let statusReadout = StatusUsageReadoutView()
+    private let sessionTPS = SessionTPSService()
     private let refreshTimer = QuotaRefreshTimer()
     private var isSleeping = false
 
@@ -28,7 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         usageNotifications.onOpenQuota = { [weak self] in
             guard let self, let button = self.statusItem.button else { return }
-            self.requestRefresh(.menuOpen, includeResetCreditDetails: true)
+            self.requestRefresh(.menuOpen)
             if !self.panel.isShown { self.panel.show(relativeTo: button.bounds, of: button) }
             self.panel.showOverview()
         }
@@ -36,6 +37,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeWorkspace()
         configureDefaultLoginItem()
         store.onChange = { [weak self] in self?.pushState() }
+        store.onSessionTPSChange = { [weak self] in self?.pushSessionTPS() }
+        sessionTPS.onChange = { [weak self] in self?.store.updateSessionTPS($0) }
+        configureSessionTPS()
         pushState()
         restartTimer()
         requestRefresh(.launch)
@@ -48,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        sessionTPS.configure(enabled: false, available: false)
         refreshTimer.stop()
         touchBar.stop()
     }
@@ -55,11 +60,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func configureCallbacks() {
         panel.configureHistory(monitor: usageMonitoring, snapshot: { [weak self] in self?.store.snapshot },
                                isStale: { [weak self] in self?.store.freshness.isStale ?? true })
-        panel.onRefresh = { [weak self] in self?.requestRefresh(.manual, includeResetCreditDetails: true) }
+        panel.onRefresh = { [weak self] in self?.requestRefresh(.manual) }
         panel.onShowHistory = { [weak self] in self?.showHistory() }
         panel.onShowSettings = { [weak self] in self?.showSettings() }
         panel.onQuit = { [weak self] in self?.quit() }
-        appMenu.onRefresh = { [weak self] in self?.requestRefresh(.manual, includeResetCreditDetails: true) }
+        appMenu.onRefresh = { [weak self] in self?.requestRefresh(.manual) }
         appMenu.onHistory = { [weak self] in self?.showHistory() }
         appMenu.onSettings = { [weak self] in self?.showSettings() }
         appMenu.onQuit = { [weak self] in self?.quit() }
@@ -76,6 +81,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                name: Preferences.buttonsDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(alertsChanged),
                                                name: Preferences.alertsDidChange, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(sessionTPSChanged),
+                                               name: Preferences.sessionTPSDidChange, object: nil)
     }
 
     private func configureStatusItem() {
@@ -95,6 +102,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func observeWorkspace() {
         let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
+            center.addObserver(self, selector: #selector(codexLifecycleChanged(_:)), name: name, object: nil)
+        }
         center.addObserver(
             self,
             selector: #selector(frontmostApplicationChanged),
@@ -125,11 +135,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func refreshPreferencesChanged() { restartTimer() }
 
     @objc private func preferencesChanged() {
+        configureSessionTPS()
         pushState()
     }
 
     @objc private func buttonsChanged() {
         touchBar.controller?.applyConfiguration(Preferences.shared.touchBarConfiguration)
+        configureSessionTPS()
+        pushSessionTPS()
     }
 
     @objc private func alertsChanged() { usageMonitoring.configure() }
@@ -150,19 +163,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func frontmostApplicationChanged(_ notification: Notification) {
+        configureSessionTPS()
         updateTouchBarVisibility()
+        pushSessionTPS()
         restartTimer(forceRestart: false)
         if isCodexFrontmost { requestRefresh(.foreground) }
     }
 
     @objc private func systemWillSleep(_ notification: Notification) {
         isSleeping = true
+        configureSessionTPS()
         refreshTimer.stop()
         touchBar.controller?.setVisible(false)
     }
 
     @objc private func systemDidWake(_ notification: Notification) {
         isSleeping = false
+        configureSessionTPS()
         refreshTouchBarSupport()
         restartTimer()
         requestRefresh(.wake)
@@ -175,6 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func refreshTouchBarSupport() {
         touchBarSupport = TouchBarSystem.detect()
         settingsWindow?.updateTouchBarSupport(touchBarSupport)
+        configureSessionTPS()
         updateTouchBarVisibility()
     }
 
@@ -199,14 +217,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @discardableResult
-    private func requestRefresh(_ trigger: QuotaRefreshTrigger, includeResetCreditDetails: Bool = false) -> Bool {
+    private func requestRefresh(_ trigger: QuotaRefreshTrigger) -> Bool {
         guard !isSleeping else { return false }
         return Preferences.shared.refreshPolicy.perform(trigger) {
-            store.refresh(includeResetCreditDetails: QuotaRefreshPolicy.includesResetCreditDetails(
-                explicit: includeResetCreditDetails,
-                panelVisible: panel.isShown,
-                expiryReminderEnabled: Preferences.shared.usageAlertOptions.resetExpiry
-            ))
+            store.refresh()
         }
     }
 
@@ -231,7 +245,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appMenu.makeMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY + 4), in: button)
             return
         }
-        if !panel.isShown { requestRefresh(.menuOpen, includeResetCreditDetails: true) }
+        if !panel.isShown { requestRefresh(.menuOpen) }
         panel.show(relativeTo: button.bounds, of: button)
     }
 
@@ -264,5 +278,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             button.toolTip = store.isRefreshing ? "正在读取 Codex 额度" : "Codex 额度不可用"
         }
+        pushSessionTPS()
+    }
+
+    @objc private func sessionTPSChanged() { configureSessionTPS(); pushState() }
+    @objc private func codexLifecycleChanged(_ notification: Notification) {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              app.bundleIdentifier == ApplicationIdentity.chatGPTBundleIdentifier else { return }
+        configureSessionTPS()
+    }
+    private func configureSessionTPS() {
+        let running = !NSRunningApplication.runningApplications(withBundleIdentifier: ApplicationIdentity.chatGPTBundleIdentifier).isEmpty
+        let options = Preferences.shared.sessionTPSOptions
+        let enabled = options.needsObservation(touchBarAvailable: touchBarSupport.isUsable,
+                                               touchBarEnabled: Preferences.shared.touchBarEnabled)
+        sessionTPS.configure(enabled: enabled, available: running && !isSleeping, active: isCodexFrontmost)
+    }
+    private func pushSessionTPS() {
+        let options = Preferences.shared.sessionTPSOptions
+        var value = store.sessionTPS
+        if !isCodexFrontmost, value.tokensPerSecond != nil {
+            value.detail = "最近查看的对话 · " + value.detail
+        }
+        statusReadout.updateSessionTPS(value, enabled: options.menuBar)
+        if statusItem.length != statusReadout.menuItemWidth { statusItem.length = statusReadout.menuItemWidth }
+        if options.menuBar, let button = statusItem.button {
+            let quota = "H \(store.snapshot?.fiveHour.map { "\($0.remainingPercent)%" } ?? "—") · W \(store.snapshot?.weekly.map { "\($0.remainingPercent)%" } ?? "—")"
+            let tooltip = quota + "\n" + value.toolTip
+            if button.toolTip != tooltip { button.toolTip = tooltip }
+        }
+        touchBar.controller?.updateSessionTPS(value, enabled: options.touchBar)
     }
 }

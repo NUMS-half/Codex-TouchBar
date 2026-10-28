@@ -115,6 +115,8 @@ final class PanelController: NSObject, NSPopoverDelegate {
 
     private func configureControls() {
         titleLabel.font = .systemFont(ofSize: 18, weight: .bold)
+        creditLabel.lineBreakMode = .byTruncatingTail
+        creditLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         [creditLabel, resetLabel].forEach {
             $0.font = .systemFont(ofSize: 13, weight: .medium)
             $0.textColor = .secondaryLabelColor
@@ -255,10 +257,11 @@ final class PanelController: NSObject, NSPopoverDelegate {
         cards.spacing = 8
         cards.translatesAutoresizingMaskIntoConstraints = false
 
-        let creditRow = NSStackView(views: [creditIcon, creditLabel])
+        let creditRow = NSStackView(views: [creditIcon, creditLabel, spacer()])
         creditRow.orientation = .horizontal
         creditRow.alignment = .centerY
         creditRow.spacing = 6
+        creditRow.detachesHiddenViews = true
         creditRow.translatesAutoresizingMaskIntoConstraints = false
 
         let resetRow = NSStackView(views: [resetIcon, resetLabel, spacer(), resetExpiryLabel])
@@ -307,6 +310,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
             details.leadingAnchor.constraint(equalTo: header.leadingAnchor),
             details.trailingAnchor.constraint(equalTo: header.trailingAnchor),
             resetRow.widthAnchor.constraint(equalTo: details.widthAnchor),
+            creditRow.widthAnchor.constraint(equalTo: details.widthAnchor),
             refreshButton.widthAnchor.constraint(equalToConstant: 22),
             refreshButton.heightAnchor.constraint(equalToConstant: 22),
             footer.topAnchor.constraint(equalTo: details.bottomAnchor, constant: 14),
@@ -336,6 +340,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         weeklyCard.update(snapshot?.weekly, hasSnapshot: snapshot != nil, change: recentChanges[.weekly], isStale: old, now: now)
         planTag.update(planType: snapshot?.planType, limitName: snapshot?.limitName)
         creditLabel.stringValue = creditText(snapshot)
+        creditLabel.toolTip = creditLabel.stringValue
         resetLabel.stringValue = snapshot?.availableResetCredits.map { "可用重置：\($0) 次" } ?? "可用重置：—"
         let expiry = snapshot?.earliestAvailableResetExpiry.flatMap { $0 > Date() ? $0 : nil }
         resetExpiryLabel.stringValue = expiry.map(resetExpiryText) ?? ""

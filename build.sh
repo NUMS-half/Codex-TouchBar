@@ -37,6 +37,7 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 
 cp "$EXEC_PATH" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 cp "Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
+cp "docs/THIRD-PARTY-NOTICES.md" "$APP_BUNDLE/Contents/Resources/ThirdPartyNotices.md"
 
 # Render the simple source SVG at the standard macOS icon sizes and package it
 # as an ICNS file. The SVG remains the editable source of truth.
